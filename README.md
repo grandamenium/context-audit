@@ -4,6 +4,27 @@ See exactly what context an AI coding agent loads when it starts in a folder: bo
 
 Supports **Claude Code**, **Codex** and **OpenCode**.
 
+## Quick start: ask your agent
+
+Paste this into Claude Code, Codex or OpenCode:
+
+> Run this on yourself: https://github.com/grandamenium/context-audit
+
+The agent clones the repo, audits its own live session, opens an interactive report in your browser and replies with a standard summary. Tested blind with fresh Claude Code and Codex agents. A bare "use this" works for most agents, but Codex may ask what you want first.
+
+## For AI agents
+
+If a user gave you this link and asked you to use it, do this:
+
+```sh
+git clone https://github.com/grandamenium/context-audit /tmp/context-audit   # skip if already cloned
+node /tmp/context-audit/dist/context-audit.mjs
+```
+
+No install step is needed, only Node.js 20+. When an agent runs it, the tool detects that agent's own session (harness, process, boot folder, launch flags), compares against the session's own log, writes an interactive HTML report, opens it in the user's browser, and prints a fixed-format summary.
+
+**Always answer in this shape:** reply with everything between `===== BEGIN CONTEXT AUDIT =====` and `===== END CONTEXT AUDIT =====` exactly as printed, then answer the user's specific question in a sentence or two. If the report did not open in the browser, give the user its path. Skills-aware agents can install [`skills/context-audit/SKILL.md`](skills/context-audit/SKILL.md) to do this without instructions.
+
 ## Install
 
 Requires Node.js 20 or newer.
@@ -43,7 +64,7 @@ Pick what to audit:
 ### Terminal
 
 ```sh
-context-audit                       # audits the agent that ran it, or the current folder
+context-audit                       # in an agent: summary + HTML report; in a terminal: tree view
 context-audit path/to/project       # audit a specific folder
 context-audit --harness claude      # one harness: claude, codex, opencode
 context-audit --kind skill,mcp,hook # only some kinds
@@ -51,6 +72,8 @@ context-audit --all                 # include shadowed and disabled items, with 
 context-audit --live                # compare with the live session log
 context-audit --json                # machine-readable report
 context-audit --html report.html --open
+context-audit --summary             # fixed-format summary + HTML report (agent default)
+context-audit --tree                # tree view even inside an agent
 ```
 
 When an agent runs `context-audit` itself, the tool finds that agent's process, the folder it booted in and its launch flags, so the report describes the session you are talking to, not just the shell's current folder.

@@ -138,7 +138,7 @@ test('--settings layer hooks', () => {
   assert.equal(r.items.find((i) => i.name === 'SessionStart:*').path, f);
 });
 
-test('mcp: approval states, local, user, settings unknown', () => {
+test('mcp: approval states, local, user, settings.json servers ignored', () => {
   const t = mk();
   t.w(path.join(t.proj, '.mcp.json'), { mcpServers: { undecided: { command: 'a' }, yes: { command: 'b' }, no: { command: 'c' } } });
   t.w(path.join(t.home, '.claude.json'), {
@@ -150,7 +150,7 @@ test('mcp: approval states, local, user, settings unknown', () => {
   t.w(path.join(t.home, '.claude', 'settings.json'), { mcpServers: { odd: { command: 'q' } } });
   const r = t.run();
   assert.deepEqual(tuples(r, 'mcp'), [
-    'loc|local|active', 'no|project|disabled', 'odd|user|unknown', 'undecided|project|needs-approval', 'usr|user|active', 'yes|project|active',
+    'loc|local|active', 'no|project|disabled', 'odd|user|disabled', 'undecided|project|needs-approval', 'usr|user|active', 'yes|project|active',
   ]);
   const s = JSON.stringify(r);
   assert.ok(!s.includes('zzz') && !s.includes('abc'));

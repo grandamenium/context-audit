@@ -1,6 +1,7 @@
 import os from 'node:os';
 import { SCHEMA_VERSION } from './model.js';
-import { canonical } from './fsutil.js';
+import path from 'node:path';
+import { canonical, readFrontmatter } from './fsutil.js';
 import { detectSession } from './session.js';
 import { auditClaude } from './harness/claude.js';
 import { auditCodex } from './harness/codex.js';
@@ -56,5 +57,32 @@ export function audit(opts = {}) {
       }
     }
   }
+  report.hygiene = skillHygiene(report);
   return report;
+}
+
+// Skill files whose frontmatter will confuse a harness or a reader: missing name/description,
+// or a name that differs from its folder (harnesses disagree on which one wins).
+function skillHygiene(report) {
+  const byPath = new Map();
+  for (const [h, r] of Object.entries(report.harnesses)) {
+    for (const it of r.items || []) {
+      if (it.kind !== 'skill' || !/SKILL\.md$/.test(it.path || '')) continue;
+      const e = byPath.get(it.path) || { path: it.path, harnesses: [] };
+      if (!e.harnesses.includes(h)) e.harnesses.push(h);
+      byPath.set(it.path, e);
+    }
+  }
+  const out = [];
+  for (const e of byPath.values()) {
+    const fm = readFrontmatter(e.path);
+    if (!fm) continue;
+    const dir = path.basename(path.dirname(e.path));
+    const name = fm.data?.name, desc = fm.data?.description;
+    if (!name && !desc) out.push({ ...e, issue: 'no name or description in frontmatter (OpenCode skips it; others fall back to the folder name)' });
+    else if (!desc) out.push({ ...e, issue: 'no description in frontmatter, so the model cannot tell when to use it' });
+    else if (!name) out.push({ ...e, issue: `no name in frontmatter; harnesses fall back to the folder name "${dir}"` });
+    else if (String(name) !== dir) out.push({ ...e, issue: `frontmatter name "${name}" differs from folder "${dir}"; Claude Code lists it by folder, OpenCode and Codex by name` });
+  }
+  return out;
 }

@@ -467,13 +467,18 @@ export function auditClaude(ctx) {
   if (claudeJson.hasCompletedClaudeInChromeOnboarding || claudeJson.claudeInChromeDefaultEnabled) {
     push({ kind: 'mcp', name: 'claude-in-chrome', scope: 'builtin', status: 'active', path: claudeJsonPath, reason: 'built-in Claude in Chrome integration (claudeInChromeDefaultEnabled / onboarding in ~/.claude.json); not defined by any server config', details: { transport: 'builtin' } });
   }
-  // settings.json mcpServers: docs place user servers in ~/.claude.json, so effect is unverified
+  // settings.json mcpServers is ignored by Claude Code: verified against 51 session logs, where a
+  // server defined only there (sentry) never appeared in any MCP load record.
+  const loadedNames = new Set(items.filter((i) => i.kind === 'mcp' && i.status === 'active').map((i) => i.name));
   for (const s of sources) {
     for (const [n, c] of Object.entries(s.data.mcpServers || {})) {
       const details = { transport: c?.type || (c?.url ? 'http' : 'stdio') };
       if (c?.command) details.command = c.command;
       if (c?.url) details.url = scrubUrl(c.url);
-      push({ kind: 'mcp', name: n, scope: s.scope, status: 'unknown', path: s.path, reason: 'mcpServers key in settings.json is not a documented MCP location (user servers live in ~/.claude.json)', details: redact(details) });
+      const reason = loadedNames.has(n)
+        ? `ignored here: Claude Code does not read mcpServers from settings files. "${n}" still loads from its definition in ~/.claude.json or .mcp.json`
+        : 'ignored: Claude Code does not read mcpServers from settings files. Move it to ~/.claude.json (claude mcp add) or .mcp.json for it to load';
+      push({ kind: 'mcp', name: n, scope: s.scope, status: 'disabled', path: s.path, reason, details: redact(details) });
     }
   }
   warnings.push('claude.ai connectors cannot be detected from local files; list them from a live session (/mcp)');

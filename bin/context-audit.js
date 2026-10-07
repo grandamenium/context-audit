@@ -14,6 +14,9 @@ const USAGE = `Usage: context-audit [dir] [options]
   --session <id>    session id for --live
   --kind a,b        only show these kinds (skill,mcp,hook,bootstrap,plugin,command,agent,rule)
   --all             include disabled and shadowed items
+  --summary         fixed-format summary + HTML report (default when an agent runs it)
+  --tree            terminal tree even when run by an agent
+  --no-open         do not open the HTML report in a browser
   -h, --help
 `;
 
@@ -49,6 +52,7 @@ try {
     options: {
       harness: { type: 'string' }, json: { type: 'boolean' }, open: { type: 'boolean' }, live: { type: 'boolean' },
       session: { type: 'string' }, kind: { type: 'string' }, all: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
+      summary: { type: 'boolean' }, tree: { type: 'boolean' }, 'no-open': { type: 'boolean' },
     },
   });
 } catch (e) {
@@ -66,11 +70,46 @@ if (bad?.length) { console.error(`unknown harness: ${bad.join(', ')} (known: ${O
 const KIND_ALIAS = { skills: 'skill', hooks: 'hook', plugins: 'plugin', commands: 'command', agents: 'agent', rules: 'rule', docs: 'bootstrap' };
 const kinds = list(values.kind)?.map((k) => KIND_ALIAS[k] || k);
 
-const wantLive = values.live || !!values.session;
+const { detectSession } = await import('../src/session.js');
+const session = detectSession();
+// Agent mode: when an agent runs the tool (or --summary), always produce both the interactive
+// HTML report and a fixed-format summary the agent relays verbatim, so every agent answers alike.
+const agentMode = (values.summary || !!session.harness) && !values.json && !values.tree;
+const wantLive = values.live || !!values.session || (agentMode && !!session.harness && !positionals[0]);
 const report = audit({
   cwd: positionals[0] ? path.resolve(positionals[0]) : undefined,
   harnesses, live: wantLive, sessionId: values.session,
+  session: positionals[0] ? { harness: null, detectedBy: [] } : session,
 });
+
+if (agentMode) {
+  const os = await import('node:os');
+  const { renderHtml } = await import('../src/render/html.js');
+  const { renderSummary } = await import('../src/render/summary.js');
+  const dir = path.join(os.tmpdir(), 'context-audit');
+  fs.mkdirSync(dir, { recursive: true });
+  const file = htmlFile ? path.resolve(htmlFile) : path.join(dir, `report-${path.basename(report.cwd) || 'root'}-${new Date().toISOString().replace(/[:.]/g, '-')}.html`);
+  fs.writeFileSync(file, renderHtml(report, { all: values.all }));
+  let opened = false;
+  if (!values['no-open'] && !process.env.CONTEXT_AUDIT_NO_OPEN) {
+    try {
+      const child = spawn(process.platform === 'darwin' ? 'open' : process.platform === 'win32' ? 'explorer' : 'xdg-open', [file], { stdio: 'ignore', detached: true });
+      child.on('error', () => {});
+      child.unref();
+      opened = !!child.pid;
+    } catch { /* no opener available (sandbox, headless) */ }
+  }
+  const which = report.session?.harness && report.harnesses[report.session.harness] ? [report.session.harness] : Object.keys(report.harnesses);
+  const body = which.map((h) => renderSummary(report, { harness: h, htmlPath: file, opened })).join('\n---\n\n');
+  process.stdout.write([
+    'AGENT INSTRUCTIONS: Reply to the user with everything between the BEGIN and END lines, exactly as written (it is Markdown). Do not shorten or paraphrase it. Then answer any specific question they asked in one or two sentences. The interactive report is a local HTML file: if it did not open in their browser, give them the path so they can open it.',
+    '===== BEGIN CONTEXT AUDIT =====',
+    body.trimEnd(),
+    '===== END CONTEXT AUDIT =====',
+    '',
+  ].join('\n'));
+  return;
+}
 
 if (values.json) {
   // return instead of process.exit: exiting drops buffered stdout when piped (~64KB cap)

@@ -1861,17 +1861,17 @@ var require_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    function visit_(key, node, visitor, path10) {
-      const ctrl = callVisitor(key, node, visitor, path10);
+    function visit_(key, node, visitor, path12) {
+      const ctrl = callVisitor(key, node, visitor, path12);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path10, ctrl);
-        return visit_(key, ctrl, visitor, path10);
+        replaceNode(key, path12, ctrl);
+        return visit_(key, ctrl, visitor, path12);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path10 = Object.freeze(path10.concat(node));
+          path12 = Object.freeze(path12.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = visit_(i, node.items[i], visitor, path10);
+            const ci = visit_(i, node.items[i], visitor, path12);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -1882,13 +1882,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path10 = Object.freeze(path10.concat(node));
-          const ck = visit_("key", node.key, visitor, path10);
+          path12 = Object.freeze(path12.concat(node));
+          const ck = visit_("key", node.key, visitor, path12);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = visit_("value", node.value, visitor, path10);
+          const cv = visit_("value", node.value, visitor, path12);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -1909,17 +1909,17 @@ var require_visit = __commonJS({
     visitAsync.BREAK = BREAK;
     visitAsync.SKIP = SKIP;
     visitAsync.REMOVE = REMOVE;
-    async function visitAsync_(key, node, visitor, path10) {
-      const ctrl = await callVisitor(key, node, visitor, path10);
+    async function visitAsync_(key, node, visitor, path12) {
+      const ctrl = await callVisitor(key, node, visitor, path12);
       if (identity.isNode(ctrl) || identity.isPair(ctrl)) {
-        replaceNode(key, path10, ctrl);
-        return visitAsync_(key, ctrl, visitor, path10);
+        replaceNode(key, path12, ctrl);
+        return visitAsync_(key, ctrl, visitor, path12);
       }
       if (typeof ctrl !== "symbol") {
         if (identity.isCollection(node)) {
-          path10 = Object.freeze(path10.concat(node));
+          path12 = Object.freeze(path12.concat(node));
           for (let i = 0; i < node.items.length; ++i) {
-            const ci = await visitAsync_(i, node.items[i], visitor, path10);
+            const ci = await visitAsync_(i, node.items[i], visitor, path12);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -1930,13 +1930,13 @@ var require_visit = __commonJS({
             }
           }
         } else if (identity.isPair(node)) {
-          path10 = Object.freeze(path10.concat(node));
-          const ck = await visitAsync_("key", node.key, visitor, path10);
+          path12 = Object.freeze(path12.concat(node));
+          const ck = await visitAsync_("key", node.key, visitor, path12);
           if (ck === BREAK)
             return BREAK;
           else if (ck === REMOVE)
             node.key = null;
-          const cv = await visitAsync_("value", node.value, visitor, path10);
+          const cv = await visitAsync_("value", node.value, visitor, path12);
           if (cv === BREAK)
             return BREAK;
           else if (cv === REMOVE)
@@ -1963,23 +1963,23 @@ var require_visit = __commonJS({
       }
       return visitor;
     }
-    function callVisitor(key, node, visitor, path10) {
+    function callVisitor(key, node, visitor, path12) {
       if (typeof visitor === "function")
-        return visitor(key, node, path10);
+        return visitor(key, node, path12);
       if (identity.isMap(node))
-        return visitor.Map?.(key, node, path10);
+        return visitor.Map?.(key, node, path12);
       if (identity.isSeq(node))
-        return visitor.Seq?.(key, node, path10);
+        return visitor.Seq?.(key, node, path12);
       if (identity.isPair(node))
-        return visitor.Pair?.(key, node, path10);
+        return visitor.Pair?.(key, node, path12);
       if (identity.isScalar(node))
-        return visitor.Scalar?.(key, node, path10);
+        return visitor.Scalar?.(key, node, path12);
       if (identity.isAlias(node))
-        return visitor.Alias?.(key, node, path10);
+        return visitor.Alias?.(key, node, path12);
       return void 0;
     }
-    function replaceNode(key, path10, node) {
-      const parent = path10[path10.length - 1];
+    function replaceNode(key, path12, node) {
+      const parent = path12[path12.length - 1];
       if (identity.isCollection(parent)) {
         parent.items[key] = node;
       } else if (identity.isPair(parent)) {
@@ -2591,10 +2591,10 @@ var require_Collection = __commonJS({
     var createNode = require_createNode();
     var identity = require_identity();
     var Node = require_Node();
-    function collectionFromPath(schema, path10, value) {
+    function collectionFromPath(schema, path12, value) {
       let v = value;
-      for (let i = path10.length - 1; i >= 0; --i) {
-        const k = path10[i];
+      for (let i = path12.length - 1; i >= 0; --i) {
+        const k = path12[i];
         if (typeof k === "number" && Number.isInteger(k) && k >= 0) {
           const a = [];
           a[k] = v;
@@ -2613,7 +2613,7 @@ var require_Collection = __commonJS({
         sourceObjects: /* @__PURE__ */ new Map()
       });
     }
-    var isEmptyPath = (path10) => path10 == null || typeof path10 === "object" && !!path10[Symbol.iterator]().next().done;
+    var isEmptyPath = (path12) => path12 == null || typeof path12 === "object" && !!path12[Symbol.iterator]().next().done;
     var Collection = class extends Node.NodeBase {
       constructor(type, schema) {
         super(type);
@@ -2643,11 +2643,11 @@ var require_Collection = __commonJS({
        * be a Pair instance or a `{ key, value }` object, which may not have a key
        * that already exists in the map.
        */
-      addIn(path10, value) {
-        if (isEmptyPath(path10))
+      addIn(path12, value) {
+        if (isEmptyPath(path12))
           this.add(value);
         else {
-          const [key, ...rest] = path10;
+          const [key, ...rest] = path12;
           const node = this.get(key, true);
           if (identity.isCollection(node))
             node.addIn(rest, value);
@@ -2661,8 +2661,8 @@ var require_Collection = __commonJS({
        * Removes a value from the collection.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path10) {
-        const [key, ...rest] = path10;
+      deleteIn(path12) {
+        const [key, ...rest] = path12;
         if (rest.length === 0)
           return this.delete(key);
         const node = this.get(key, true);
@@ -2676,8 +2676,8 @@ var require_Collection = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path10, keepScalar) {
-        const [key, ...rest] = path10;
+      getIn(path12, keepScalar) {
+        const [key, ...rest] = path12;
         const node = this.get(key, true);
         if (rest.length === 0)
           return !keepScalar && identity.isScalar(node) ? node.value : node;
@@ -2695,8 +2695,8 @@ var require_Collection = __commonJS({
       /**
        * Checks if the collection includes a value with the key `key`.
        */
-      hasIn(path10) {
-        const [key, ...rest] = path10;
+      hasIn(path12) {
+        const [key, ...rest] = path12;
         if (rest.length === 0)
           return this.has(key);
         const node = this.get(key, true);
@@ -2706,8 +2706,8 @@ var require_Collection = __commonJS({
        * Sets a value in this collection. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path10, value) {
-        const [key, ...rest] = path10;
+      setIn(path12, value) {
+        const [key, ...rest] = path12;
         if (rest.length === 0) {
           this.set(key, value);
         } else {
@@ -5222,9 +5222,9 @@ var require_Document = __commonJS({
           this.contents.add(value);
       }
       /** Adds a value to the document. */
-      addIn(path10, value) {
+      addIn(path12, value) {
         if (assertCollection(this.contents))
-          this.contents.addIn(path10, value);
+          this.contents.addIn(path12, value);
       }
       /**
        * Create a new `Alias` node, ensuring that the target `node` has the required anchor.
@@ -5299,14 +5299,14 @@ var require_Document = __commonJS({
        * Removes a value from the document.
        * @returns `true` if the item was found and removed.
        */
-      deleteIn(path10) {
-        if (Collection.isEmptyPath(path10)) {
+      deleteIn(path12) {
+        if (Collection.isEmptyPath(path12)) {
           if (this.contents == null)
             return false;
           this.contents = null;
           return true;
         }
-        return assertCollection(this.contents) ? this.contents.deleteIn(path10) : false;
+        return assertCollection(this.contents) ? this.contents.deleteIn(path12) : false;
       }
       /**
        * Returns item at `key`, or `undefined` if not found. By default unwraps
@@ -5321,10 +5321,10 @@ var require_Document = __commonJS({
        * scalar values from their surrounding node; to disable set `keepScalar` to
        * `true` (collections are always returned intact).
        */
-      getIn(path10, keepScalar) {
-        if (Collection.isEmptyPath(path10))
+      getIn(path12, keepScalar) {
+        if (Collection.isEmptyPath(path12))
           return !keepScalar && identity.isScalar(this.contents) ? this.contents.value : this.contents;
-        return identity.isCollection(this.contents) ? this.contents.getIn(path10, keepScalar) : void 0;
+        return identity.isCollection(this.contents) ? this.contents.getIn(path12, keepScalar) : void 0;
       }
       /**
        * Checks if the document includes a value with the key `key`.
@@ -5335,10 +5335,10 @@ var require_Document = __commonJS({
       /**
        * Checks if the document includes a value at `path`.
        */
-      hasIn(path10) {
-        if (Collection.isEmptyPath(path10))
+      hasIn(path12) {
+        if (Collection.isEmptyPath(path12))
           return this.contents !== void 0;
-        return identity.isCollection(this.contents) ? this.contents.hasIn(path10) : false;
+        return identity.isCollection(this.contents) ? this.contents.hasIn(path12) : false;
       }
       /**
        * Sets a value in this document. For `!!set`, `value` needs to be a
@@ -5355,13 +5355,13 @@ var require_Document = __commonJS({
        * Sets a value in this document. For `!!set`, `value` needs to be a
        * boolean to add/remove the item from the set.
        */
-      setIn(path10, value) {
-        if (Collection.isEmptyPath(path10)) {
+      setIn(path12, value) {
+        if (Collection.isEmptyPath(path12)) {
           this.contents = value;
         } else if (this.contents == null) {
-          this.contents = Collection.collectionFromPath(this.schema, Array.from(path10), value);
+          this.contents = Collection.collectionFromPath(this.schema, Array.from(path12), value);
         } else if (assertCollection(this.contents)) {
-          this.contents.setIn(path10, value);
+          this.contents.setIn(path12, value);
         }
       }
       /**
@@ -7322,9 +7322,9 @@ var require_cst_visit = __commonJS({
     visit2.BREAK = BREAK;
     visit2.SKIP = SKIP;
     visit2.REMOVE = REMOVE;
-    visit2.itemAtPath = (cst, path10) => {
+    visit2.itemAtPath = (cst, path12) => {
       let item2 = cst;
-      for (const [field, index] of path10) {
+      for (const [field, index] of path12) {
         const tok = item2?.[field];
         if (tok && "items" in tok) {
           item2 = tok.items[index];
@@ -7333,23 +7333,23 @@ var require_cst_visit = __commonJS({
       }
       return item2;
     };
-    visit2.parentCollection = (cst, path10) => {
-      const parent = visit2.itemAtPath(cst, path10.slice(0, -1));
-      const field = path10[path10.length - 1][0];
+    visit2.parentCollection = (cst, path12) => {
+      const parent = visit2.itemAtPath(cst, path12.slice(0, -1));
+      const field = path12[path12.length - 1][0];
       const coll = parent?.[field];
       if (coll && "items" in coll)
         return coll;
       throw new Error("Parent collection not found");
     };
-    function _visit(path10, item2, visitor) {
-      let ctrl = visitor(item2, path10);
+    function _visit(path12, item2, visitor) {
+      let ctrl = visitor(item2, path12);
       if (typeof ctrl === "symbol")
         return ctrl;
       for (const field of ["key", "value"]) {
         const token = item2[field];
         if (token && "items" in token) {
           for (let i = 0; i < token.items.length; ++i) {
-            const ci = _visit(Object.freeze(path10.concat([[field, i]])), token.items[i], visitor);
+            const ci = _visit(Object.freeze(path12.concat([[field, i]])), token.items[i], visitor);
             if (typeof ci === "number")
               i = ci - 1;
             else if (ci === BREAK)
@@ -7360,10 +7360,10 @@ var require_cst_visit = __commonJS({
             }
           }
           if (typeof ctrl === "function" && field === "key")
-            ctrl = ctrl(item2, path10);
+            ctrl = ctrl(item2, path12);
         }
       }
-      return typeof ctrl === "function" ? ctrl(item2, path10) : ctrl;
+      return typeof ctrl === "function" ? ctrl(item2, path12) : ctrl;
     }
     exports.visit = visit2;
   }
@@ -9463,6 +9463,13 @@ var init_codex = __esm({
 });
 
 // src/session.js
+var session_exports = {};
+__export(session_exports, {
+  detectSession: () => detectSession,
+  parseLaunchFlags: () => parseLaunchFlags,
+  processArgs: () => processArgs,
+  processCwd: () => processCwd
+});
 import { execFileSync } from "node:child_process";
 import path3 from "node:path";
 import os from "node:os";
@@ -10076,12 +10083,14 @@ function auditClaude(ctx) {
   if (claudeJson.hasCompletedClaudeInChromeOnboarding || claudeJson.claudeInChromeDefaultEnabled) {
     push({ kind: "mcp", name: "claude-in-chrome", scope: "builtin", status: "active", path: claudeJsonPath, reason: "built-in Claude in Chrome integration (claudeInChromeDefaultEnabled / onboarding in ~/.claude.json); not defined by any server config", details: { transport: "builtin" } });
   }
+  const loadedNames = new Set(items.filter((i) => i.kind === "mcp" && i.status === "active").map((i) => i.name));
   for (const s of sources) {
     for (const [n, c] of Object.entries(s.data.mcpServers || {})) {
       const details = { transport: c?.type || (c?.url ? "http" : "stdio") };
       if (c?.command) details.command = c.command;
       if (c?.url) details.url = scrubUrl(c.url);
-      push({ kind: "mcp", name: n, scope: s.scope, status: "unknown", path: s.path, reason: "mcpServers key in settings.json is not a documented MCP location (user servers live in ~/.claude.json)", details: redact(details) });
+      const reason = loadedNames.has(n) ? `ignored here: Claude Code does not read mcpServers from settings files. "${n}" still loads from its definition in ~/.claude.json or .mcp.json` : "ignored: Claude Code does not read mcpServers from settings files. Move it to ~/.claude.json (claude mcp add) or .mcp.json for it to load";
+      push({ kind: "mcp", name: n, scope: s.scope, status: "disabled", path: s.path, reason, details: redact(details) });
     }
   }
   warnings.push("claude.ai connectors cannot be detected from local files; list them from a live session (/mcp)");
@@ -11300,6 +11309,7 @@ __export(src_exports, {
   audit: () => audit
 });
 import os2 from "node:os";
+import path8 from "node:path";
 function audit(opts = {}) {
   const env = opts.env || process.env;
   const home = canonical(opts.home || os2.homedir());
@@ -11332,7 +11342,31 @@ function audit(opts = {}) {
       }
     }
   }
+  report.hygiene = skillHygiene(report);
   return report;
+}
+function skillHygiene(report) {
+  const byPath = /* @__PURE__ */ new Map();
+  for (const [h, r] of Object.entries(report.harnesses)) {
+    for (const it of r.items || []) {
+      if (it.kind !== "skill" || !/SKILL\.md$/.test(it.path || "")) continue;
+      const e = byPath.get(it.path) || { path: it.path, harnesses: [] };
+      if (!e.harnesses.includes(h)) e.harnesses.push(h);
+      byPath.set(it.path, e);
+    }
+  }
+  const out = [];
+  for (const e of byPath.values()) {
+    const fm = readFrontmatter(e.path);
+    if (!fm) continue;
+    const dir = path8.basename(path8.dirname(e.path));
+    const name = fm.data?.name, desc = fm.data?.description;
+    if (!name && !desc) out.push({ ...e, issue: "no name or description in frontmatter (OpenCode skips it; others fall back to the folder name)" });
+    else if (!desc) out.push({ ...e, issue: "no description in frontmatter, so the model cannot tell when to use it" });
+    else if (!name) out.push({ ...e, issue: `no name in frontmatter; harnesses fall back to the folder name "${dir}"` });
+    else if (String(name) !== dir) out.push({ ...e, issue: `frontmatter name "${name}" differs from folder "${dir}"; Claude Code lists it by folder, OpenCode and Codex by name` });
+  }
+  return out;
 }
 var ADAPTERS, LIVE;
 var init_src = __esm({
@@ -11918,7 +11952,7 @@ var init_app = __esm({
 // src/discover.js
 import fs7 from "node:fs";
 import os3 from "node:os";
-import path8 from "node:path";
+import path9 from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 function listRunning() {
   let out = "";
@@ -11949,10 +11983,10 @@ function listRunning() {
 function listRecent({ home = os3.homedir(), hours = 72, limit = 40 } = {}) {
   const since = Date.now() - hours * 36e5;
   const rows = [];
-  const claudeBase = path8.join(home, ".claude/projects");
+  const claudeBase = path9.join(home, ".claude/projects");
   for (const d of safeDir(claudeBase)) {
-    for (const f of safeDir(path8.join(claudeBase, d)).filter((x) => x.endsWith(".jsonl"))) {
-      const p = path8.join(claudeBase, d, f);
+    for (const f of safeDir(path9.join(claudeBase, d)).filter((x) => x.endsWith(".jsonl"))) {
+      const p = path9.join(claudeBase, d, f);
       const st = safeStat(p);
       if (!st || st.mtimeMs < since || st.size < 2e3) continue;
       for (const l of firstLines(p)) {
@@ -11967,10 +12001,10 @@ function listRecent({ home = os3.homedir(), hours = 72, limit = 40 } = {}) {
       }
     }
   }
-  const codexBase = path8.join(process.env.CODEX_HOME || path8.join(home, ".codex"), "sessions");
+  const codexBase = path9.join(process.env.CODEX_HOME || path9.join(home, ".codex"), "sessions");
   const walk = (d, depth) => {
     for (const e of safeDir(d, true)) {
-      const p = path8.join(d, e.name);
+      const p = path9.join(d, e.name);
       if (e.isDirectory() && depth < 3) walk(p, depth + 1);
       else if (e.name.endsWith(".jsonl")) {
         const st = safeStat(p);
@@ -12007,11 +12041,11 @@ function safeStat(p) {
   }
 }
 function listFolder(dir) {
-  const abs = path8.resolve(dir);
+  const abs = path9.resolve(dir);
   const MARKERS = ["CLAUDE.md", "AGENTS.md", ".claude", ".codex", ".agents", ".opencode", "opencode.json", ".mcp.json", ".git"];
-  const entries = safeDir(abs, true).filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith(".") && safeStat(path8.join(abs, e.name))?.isDirectory()).map((e) => e.name).sort((a, b) => a.localeCompare(b));
-  const markers = MARKERS.filter((m) => fs7.existsSync(path8.join(abs, m)));
-  return { dir: abs, parent: path8.dirname(abs) === abs ? null : path8.dirname(abs), markers, entries };
+  const entries = safeDir(abs, true).filter((e) => (e.isDirectory() || e.isSymbolicLink()) && !e.name.startsWith(".") && safeStat(path9.join(abs, e.name))?.isDirectory()).map((e) => e.name).sort((a, b) => a.localeCompare(b));
+  const markers = MARKERS.filter((m) => fs7.existsSync(path9.join(abs, m)));
+  return { dir: abs, parent: path9.dirname(abs) === abs ? null : path9.dirname(abs), markers, entries };
 }
 var HARNESS, firstLines;
 var init_discover = __esm({
@@ -12102,6 +12136,134 @@ var init_server = __esm({
     init_app();
     init_discover();
     init_session();
+  }
+});
+
+// src/render/summary.js
+var summary_exports = {};
+__export(summary_exports, {
+  renderSummary: () => renderSummary
+});
+import path10 from "node:path";
+function skillSource(it, tild) {
+  if (it.plugin) return `plugin ${it.plugin}`;
+  const m = it.path.match(/^(.*?\/(?:\.claude|\.codex|\.agents|\.opencode|opencode)\/skills)\//);
+  if (m) return tild(m[1]);
+  return tild(path10.dirname(path10.dirname(path10.dirname(it.path)))).replace(/\/agents\/[^/]+\//, "/agents/*/");
+}
+function renderSummary(report, { harness, htmlPath, opened, maxList = 8 } = {}) {
+  const home = report.home;
+  const tild = (p) => p && home && p.startsWith(home + "/") ? "~" + p.slice(home.length) : p;
+  const h = report.harnesses[harness];
+  const items = h.items || [];
+  const s = report.session || {};
+  const out = [];
+  const flags = Object.entries(s.launch || {}).filter(([k]) => k !== "argv0").map(([k, v]) => `--${k.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase())}${Array.isArray(v) ? " " + v.map((x) => tild(x.path) || (x.inline ? "<inline>" : String(x))).join(", ") : ""}`);
+  out.push(`## Context audit: ${NAME[harness] || harness}`);
+  out.push("");
+  out.push(s.harness === harness && (s.pid || s.sessionId) ? `**Session:** ${NAME[harness]} ${s.pid ? `pid ${s.pid}` : `session ${s.sessionId}`}, booted in \`${tild(report.cwd)}\`${flags.length ? `, launch flags: ${flags.join("; ")}` : ""}` : `**Folder:** \`${tild(report.cwd)}\` (what a new ${NAME[harness]} session started here would load)`);
+  if (htmlPath) out.push(`**Interactive report:** ${htmlPath}${opened ? " (opened in your browser)" : ""}`);
+  out.push("");
+  out.push("| Kind | Active | Not active |");
+  out.push("|---|---|---|");
+  for (const [k, label] of KIND) {
+    const all = items.filter((i) => i.kind === k);
+    if (!all.length) continue;
+    const on = all.filter((i) => i.status === "active").length;
+    out.push(`| ${label} | ${on} | ${all.length - on} |`);
+  }
+  out.push("");
+  const boot = items.filter((i) => (i.kind === "bootstrap" || i.kind === "rule" && harness === "claude") && i.status === "active").sort((a, b) => (a.details?.order ?? 99) - (b.details?.order ?? 99));
+  if (boot.length) {
+    out.push(`**Bootstrap docs, in load order** (${kb(boot.reduce((n, i) => n + (i.details?.bytes || 0), 0))} total):`);
+    boot.forEach((i, n) => out.push(`${n + 1}. \`${tild(i.path)}\` ${kb(i.details?.bytes)}, ${i.scope}`));
+    out.push("");
+  }
+  const skills = items.filter((i) => i.kind === "skill" && i.status === "active");
+  if (skills.length) {
+    const by = /* @__PURE__ */ new Map();
+    for (const it of skills) {
+      const k = skillSource(it, tild);
+      by.set(k, (by.get(k) || 0) + 1);
+    }
+    const top = [...by.entries()].sort((a, b) => b[1] - a[1]);
+    out.push(`**Skills by source** (${skills.length} active):`);
+    top.slice(0, maxList).forEach(([k, n]) => out.push(`- ${n} from \`${k}\``));
+    if (top.length > maxList) out.push(`- ${top.slice(maxList).reduce((n, [, c]) => n + c, 0)} more from ${top.length - maxList} other sources`);
+    out.push("");
+  }
+  const mcp = items.filter((i) => i.kind === "mcp" && i.status === "active");
+  if (mcp.length) {
+    out.push(`**MCP servers** (${mcp.length} active): ${mcp.map((i) => `${i.name} (${i.scope})`).join(", ")}`);
+    out.push("");
+  }
+  const hooks = items.filter((i) => i.kind === "hook" && i.status === "active");
+  if (hooks.length) {
+    const ev = {};
+    for (const i of hooks) {
+      const e = i.details?.event || i.name.split(":")[0];
+      ev[e] = (ev[e] || 0) + 1;
+    }
+    const files = [...new Set(hooks.map((i) => tild(i.path)))];
+    out.push(`**Hooks** (${hooks.length} active): ${Object.entries(ev).map(([e, n]) => `${e} ${n}`).join(", ")}. Defined in: ${files.slice(0, 5).map((f) => `\`${f}\``).join(", ")}${files.length > 5 ? ` +${files.length - 5} more` : ""}`);
+    out.push("");
+  }
+  const cmp = h.live && !h.live.error ? compareLive(h) : null;
+  if (cmp) {
+    out.push("**Live check against this session's own log:**");
+    out.push("");
+    out.push("| | Predicted | Seen | Matched | Recall (file-backed) | Not file-backed / unverifiable |");
+    out.push("|---|---|---|---|---|---|");
+    for (const [k, label] of [["bootstrap", "Bootstrap docs"], ["skills", "Skills"], ["mcp", "MCP servers"]]) {
+      const c = cmp[k];
+      if (!c) {
+        out.push(`| ${label} | - | - | - | not recorded in this harness's log | - |`);
+        continue;
+      }
+      const other = (c.builtinMissing?.length || 0) + (c.unverifiableMissing?.length || 0);
+      out.push(`| ${label} | ${c.predicted} | ${c.observed} | ${c.matched} | ${pct2(c.recallFileBacked)} | ${other} |`);
+    }
+    const unexplained = ["bootstrap", "skills", "mcp"].flatMap((k) => cmp[k]?.unexplainedMissing || []);
+    out.push("");
+    out.push(unexplained.length ? `Loaded but not predicted (worth checking): ${unexplained.slice(0, maxList).join(", ")}` : "Everything the session loaded from files was predicted.");
+    out.push("");
+  }
+  const attention = items.filter((i) => ATTENTION.includes(i.status) && i.kind !== "skill");
+  const shadowedSkills = items.filter((i) => i.kind === "skill" && i.status !== "active");
+  const hygiene = (report.hygiene || []).filter((x) => x.harnesses.includes(harness));
+  if (attention.length || shadowedSkills.length || hygiene.length || h.warnings?.length) {
+    out.push("**Needs attention:**");
+    const connectors = attention.filter((i) => i.status === "unknown" && i.scope === "remote");
+    if (connectors.length) out.push(`- [unknown] ${connectors.length} claude.ai connectors (${connectors.map((i) => i.details?.connector || i.name).join(", ")}): set on the account, not in files, so whether each loads depends on the login`);
+    for (const st of ATTENTION) {
+      const group = attention.filter((i) => i.status === st && !connectors.includes(i));
+      group.slice(0, maxList).forEach((i) => out.push(`- [${st}] ${i.kind} \`${i.name}\`: ${i.reason || tild(i.path)}`));
+      if (group.length > maxList) out.push(`- [${st}] ${group.length - maxList} more ${st} items in the report`);
+    }
+    if (shadowedSkills.length) {
+      const why = {};
+      for (const i of shadowedSkills) {
+        const r = i.details?.reason || i.reason || i.status;
+        why[r] = (why[r] || 0) + 1;
+      }
+      Object.entries(why).sort((a, b) => b[1] - a[1]).slice(0, 4).forEach(([r, n]) => out.push(`- [skills] ${n} not shown to the model: ${r}`));
+    }
+    hygiene.slice(0, maxList).forEach((x) => out.push(`- [skill hygiene] \`${tild(x.path)}\`: ${x.issue}`));
+    if (hygiene.length > maxList) out.push(`- [skill hygiene] ${hygiene.length - maxList} more in the report`);
+    (h.warnings || []).slice(0, 3).forEach((w) => out.push(`- [note] ${w}`));
+    out.push("");
+  }
+  return out.join("\n");
+}
+var NAME, KIND, ATTENTION, kb, pct2;
+var init_summary = __esm({
+  "src/render/summary.js"() {
+    init_diff();
+    NAME = { claude: "Claude Code", codex: "Codex", opencode: "OpenCode" };
+    KIND = [["bootstrap", "Bootstrap docs"], ["skill", "Skills"], ["hook", "Hooks"], ["mcp", "MCP servers"], ["plugin", "Plugins"], ["command", "Commands"], ["agent", "Agents"], ["rule", "Rules"]];
+    ATTENTION = ["needs-approval", "disabled", "shadowed", "unknown"];
+    kb = (b) => b == null ? "?" : b >= 1024 ? `${(b / 1024).toFixed(1)} KB` : `${b} B`;
+    pct2 = (x) => x == null ? "n/a" : `${Math.round(x * 100)}%`;
   }
 });
 
@@ -12199,7 +12361,7 @@ var init_tree = __esm({
 
 // bin/context-audit.js
 import fs9 from "node:fs";
-import path9 from "node:path";
+import path11 from "node:path";
 import { parseArgs } from "node:util";
 import { spawn } from "node:child_process";
 var USAGE = `Usage: context-audit [dir] [options]
@@ -12212,6 +12374,9 @@ var USAGE = `Usage: context-audit [dir] [options]
   --session <id>    session id for --live
   --kind a,b        only show these kinds (skill,mcp,hook,bootstrap,plugin,command,agent,rule)
   --all             include disabled and shadowed items
+  --summary         fixed-format summary + HTML report (default when an agent runs it)
+  --tree            terminal tree even when run by an agent
+  --no-open         do not open the HTML report in a browser
   -h, --help
 `;
 if (process.argv[2] === "serve") {
@@ -12251,7 +12416,10 @@ async function main() {
         session: { type: "string" },
         kind: { type: "string" },
         all: { type: "boolean" },
-        help: { type: "boolean", short: "h" }
+        help: { type: "boolean", short: "h" },
+        summary: { type: "boolean" },
+        tree: { type: "boolean" },
+        "no-open": { type: "boolean" }
       }
     });
   } catch (e) {
@@ -12275,13 +12443,47 @@ ${USAGE}`);
   }
   const KIND_ALIAS = { skills: "skill", hooks: "hook", plugins: "plugin", commands: "command", agents: "agent", rules: "rule", docs: "bootstrap" };
   const kinds = list(values.kind)?.map((k) => KIND_ALIAS[k] || k);
-  const wantLive = values.live || !!values.session;
+  const { detectSession: detectSession2 } = await Promise.resolve().then(() => (init_session(), session_exports));
+  const session = detectSession2();
+  const agentMode = (values.summary || !!session.harness) && !values.json && !values.tree;
+  const wantLive = values.live || !!values.session || agentMode && !!session.harness && !positionals[0];
   const report = audit2({
-    cwd: positionals[0] ? path9.resolve(positionals[0]) : void 0,
+    cwd: positionals[0] ? path11.resolve(positionals[0]) : void 0,
     harnesses,
     live: wantLive,
-    sessionId: values.session
+    sessionId: values.session,
+    session: positionals[0] ? { harness: null, detectedBy: [] } : session
   });
+  if (agentMode) {
+    const os6 = await import("node:os");
+    const { renderHtml: renderHtml2 } = await Promise.resolve().then(() => (init_html(), html_exports));
+    const { renderSummary: renderSummary2 } = await Promise.resolve().then(() => (init_summary(), summary_exports));
+    const dir = path11.join(os6.tmpdir(), "context-audit");
+    fs9.mkdirSync(dir, { recursive: true });
+    const file = htmlFile ? path11.resolve(htmlFile) : path11.join(dir, `report-${path11.basename(report.cwd) || "root"}-${(/* @__PURE__ */ new Date()).toISOString().replace(/[:.]/g, "-")}.html`);
+    fs9.writeFileSync(file, renderHtml2(report, { all: values.all }));
+    let opened = false;
+    if (!values["no-open"] && !process.env.CONTEXT_AUDIT_NO_OPEN) {
+      try {
+        const child = spawn(process.platform === "darwin" ? "open" : process.platform === "win32" ? "explorer" : "xdg-open", [file], { stdio: "ignore", detached: true });
+        child.on("error", () => {
+        });
+        child.unref();
+        opened = !!child.pid;
+      } catch {
+      }
+    }
+    const which = report.session?.harness && report.harnesses[report.session.harness] ? [report.session.harness] : Object.keys(report.harnesses);
+    const body = which.map((h) => renderSummary2(report, { harness: h, htmlPath: file, opened })).join("\n---\n\n");
+    process.stdout.write([
+      "AGENT INSTRUCTIONS: Reply to the user with everything between the BEGIN and END lines, exactly as written (it is Markdown). Do not shorten or paraphrase it. Then answer any specific question they asked in one or two sentences. The interactive report is a local HTML file: if it did not open in their browser, give them the path so they can open it.",
+      "===== BEGIN CONTEXT AUDIT =====",
+      body.trimEnd(),
+      "===== END CONTEXT AUDIT =====",
+      ""
+    ].join("\n"));
+    return;
+  }
   if (values.json) {
     process.stdout.write(JSON.stringify(report, null, 2) + "\n");
     return;
@@ -12290,7 +12492,7 @@ ${USAGE}`);
   const sessionLine = positionals[0] ? `auditing ${report.cwd}` : s.harness ? `session detected: ${s.harness}${s.pid ? ` pid ${s.pid}` : ""} cwd ${s.bootCwd || report.cwd}` : `no agent session detected; using cwd ${report.cwd}`;
   if (wantHtml || values.open) {
     const { renderHtml: renderHtml2 } = await Promise.resolve().then(() => (init_html(), html_exports));
-    const file = path9.resolve(htmlFile || "context-audit.html");
+    const file = path11.resolve(htmlFile || "context-audit.html");
     fs9.writeFileSync(file, renderHtml2(report, { all: values.all }));
     console.log(sessionLine);
     console.log(file);
