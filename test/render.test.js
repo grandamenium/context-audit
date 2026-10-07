@@ -72,7 +72,7 @@ test('html is self-contained and embeds data', () => {
   assert.ok(!/<script[^>]*\ssrc=/i.test(html));
   assert.ok(!/<link[^>]*href=["']?http/i.test(html));
   assert.ok(html.includes('prefers-color-scheme:dark'));
-  for (const s of ['Hierarchy', 'By kind', 'Live vs predicted', 'copy open cmd', 'precision']) assert.ok(html.includes(s), s);
+  for (const s of ['Folder tree', 'By kind', 'Live session check (details)', 'Matches this session', 'file-backed recall', 'adjusted precision', 'Expand all', 'Collapse all', 'copy open cmd']) assert.ok(html.includes(s), s);
   const m = html.match(/<script id="data" type="application\/json">([\s\S]*?)<\/script>/);
   const data = JSON.parse(m[1]);
   assert.equal(data.harnesses.claude.items.length, 9);
