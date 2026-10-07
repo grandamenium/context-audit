@@ -151,7 +151,9 @@ export function compareLive(h) {
         unverifiable: new Set(items.filter((i) => skillKinds.includes(i.kind) && i.status === 'unknown').map(canon)),
       });
     })(),
-    mcp: category({
+    // Codex rollouts never record MCP servers, so without another oracle (e.g. `codex mcp list`)
+    // there is nothing to compare against; report not-observable instead of false extras.
+    mcp: harness === 'codex' && !(o.mcpServers || []).length ? null : category({
       preds: dedupe(mcpItems, mcpName), lives: (o.mcpServers || []).map(nameOf),
       canon: mcpName, label: mcpName, harness, cat: 'mcp', start, failed: o.mcpFailed || [],
     }),

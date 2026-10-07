@@ -141,6 +141,7 @@ function live(){
  const names={bootstrap:'Bootstrap docs',skills:'Skills',mcp:'MCP servers'};
  for(const k of ['bootstrap','skills','mcp']){
   const r=c[k];const card=$('div',{class:'card'},$('h3',{},names[k]));
+  if(!r){card.append($('div',{class:'muted'},"Not observable: this harness's session log does not record it."));cards.append(card);continue}
   const m=$('div',{class:'m'});
   const row=(l,v,bar)=>{m.append($('span',{},l),$('span',{},v))};
   row('predicted / observed / matched',r.predicted+' / '+r.observed+' / '+r.matched);

@@ -1,5 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+import os from 'node:os';
+import { codexThreadCwd } from './live/codex.js';
 
 const HARNESS_BY_COMM = [
   [/(^|\/)claude$/, 'claude'],
@@ -63,12 +65,21 @@ export function detectSession(env = process.env, startPid = process.ppid) {
     }
   }
 
+  let argv = null;
   if (s.pid) {
-    const cwd = processCwd(s.pid);
+    argv = processArgs(s.pid);
+    // A Codex app-server/exec-server hosts many threads; its process cwd is not the session's.
+    const host = argv && /(?:^| )(app-server|exec-server)(?: |$)/.test(argv.join(' '));
+    const cwd = host ? null : processCwd(s.pid);
     if (cwd) { s.bootCwd = path.resolve(cwd); s.detectedBy.push('process-cwd'); }
-    const argv = processArgs(s.pid);
-    if (argv) s.launch = parseLaunchFlags(argv, s.bootCwd || process.cwd());
+    if (host) s.detectedBy.push('codex-host-process');
   }
+  // Codex exposes its thread id to the shell; the thread's rollout records the exact boot cwd.
+  if (s.harness === 'codex' && s.sessionId) {
+    const cwd = codexThreadCwd({ home: os.homedir(), env, threadId: s.sessionId });
+    if (cwd) { s.bootCwd = path.resolve(cwd); s.detectedBy.push('codex-rollout-cwd'); }
+  }
+  if (argv) s.launch = parseLaunchFlags(argv, s.bootCwd || process.cwd());
   return s;
 }
 

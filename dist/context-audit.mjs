@@ -9238,9 +9238,234 @@ var init_fsutil = __esm({
   }
 });
 
+// src/live/codex.js
+import fs2 from "node:fs";
+import { createRequire } from "node:module";
+import path2 from "node:path";
+function listRollouts(sessionsDir) {
+  const out = [];
+  const sub = (d) => {
+    try {
+      return fs2.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return [];
+    }
+  };
+  const desc = (a, b) => b.name.localeCompare(a.name);
+  for (const y of sub(sessionsDir).filter((e) => e.isDirectory()).sort(desc))
+    for (const m of sub(path2.join(sessionsDir, y.name)).filter((e) => e.isDirectory()).sort(desc))
+      for (const d of sub(path2.join(sessionsDir, y.name, m.name)).filter((e) => e.isDirectory()).sort(desc))
+        for (const f of sub(path2.join(sessionsDir, y.name, m.name, d.name)).filter((e) => e.isFile() && /^rollout-.*\.jsonl$/.test(e.name)).sort(desc))
+          out.push(path2.join(sessionsDir, y.name, m.name, d.name, f.name));
+  return out;
+}
+function readMeta(file) {
+  let fd;
+  try {
+    fd = fs2.openSync(file, "r");
+    const buf = Buffer.alloc(65536);
+    let acc = "";
+    for (; ; ) {
+      const n = fs2.readSync(fd, buf, 0, buf.length, null);
+      if (!n) break;
+      acc += buf.toString("utf8", 0, n);
+      const nl = acc.indexOf("\n");
+      if (nl >= 0) {
+        acc = acc.slice(0, nl);
+        break;
+      }
+      if (acc.length > 4e6) return null;
+    }
+    const r = JSON.parse(acc);
+    return r.type === "session_meta" ? r.payload : null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== void 0) fs2.closeSync(fd);
+  }
+}
+function findRollout(sessionsDir, cwd, sessionId) {
+  const files = listRollouts(sessionsDir);
+  if (sessionId) {
+    const byName = files.find((f) => f.endsWith(`-${sessionId}.jsonl`));
+    if (byName) return byName;
+    return files.find((f) => readMeta(f)?.id === sessionId) || null;
+  }
+  const want = path2.resolve(cwd);
+  for (const f of files) {
+    const cw = readMeta(f)?.cwd;
+    if (cw && path2.resolve(cw) === want) return f;
+  }
+  return null;
+}
+function parseSkills(text) {
+  const roots = {};
+  const skills = [];
+  for (const line of text.split("\n")) {
+    const rm = /^- `(r\d+)` = `(.+)`$/.exec(line);
+    if (rm) {
+      roots[rm[1]] = rm[2];
+      continue;
+    }
+    if (!line.startsWith("- ")) continue;
+    const fm = /\(file: (\S+)\)\s*$/.exec(line);
+    if (!fm) continue;
+    const head = line.slice(2, fm.index);
+    const colon = head.indexOf(": ");
+    const name = (colon < 0 ? head.replace(/:\s*$/, "") : head.slice(0, colon)).trim();
+    const rel = fm[1];
+    const root = /^(r\d+)\//.exec(rel);
+    const p = root && roots[root[1]] ? path2.join(roots[root[1]], rel.slice(root[1].length + 1)) : rel;
+    skills.push({ name, path: p, realPath: realOr(p) });
+  }
+  return skills;
+}
+function resolveAgentsFiles(bootstrap, texts, codexHome) {
+  if (!texts.length) return;
+  const blob = texts.join("\n");
+  const norm = (x) => x.replace(/\s+/g, " ").trim();
+  const nb = norm(blob);
+  const dirs = /* @__PURE__ */ new Set([codexHome]);
+  for (const d of [...bootstrap.keys()]) {
+    for (let c = d; ; c = path2.dirname(c)) {
+      dirs.add(c);
+      if (path2.dirname(c) === c) break;
+    }
+  }
+  const found = /* @__PURE__ */ new Map();
+  for (const d of dirs) {
+    for (const n of ["AGENTS.override.md", "AGENTS.md"]) {
+      const f = path2.join(d, n);
+      let c;
+      try {
+        c = fs2.readFileSync(f, "utf8");
+      } catch {
+        continue;
+      }
+      if (!c.trim()) continue;
+      if (nb.includes(norm(c))) found.set(f, { path: f, dir: d, inferred: true, contentMatched: true });
+    }
+  }
+  if (!found.size) return;
+  bootstrap.clear();
+  for (const v of found.values()) bootstrap.set(v.path, v);
+}
+function omittedMcp(codexHome, threadId) {
+  if (!threadId) return [];
+  const dbPath = path2.join(codexHome, "logs_2.sqlite");
+  if (!fs2.existsSync(dbPath)) return [];
+  let db;
+  try {
+    const { DatabaseSync } = require2("node:sqlite");
+    db = new DatabaseSync(dbPath, { readOnly: true });
+    const rows = db.prepare("SELECT feedback_log_body AS b FROM logs WHERE thread_id = ? AND feedback_log_body LIKE '%omitting MCP server%'").all(threadId);
+    return [...new Set(rows.map((r) => /server_name=(\S+)/.exec(r.b)?.[1]).filter(Boolean))].sort();
+  } catch {
+    return [];
+  } finally {
+    try {
+      db?.close();
+    } catch {
+    }
+  }
+}
+function codexThreadCwd({ home, env = {}, threadId }) {
+  if (!threadId) return null;
+  const codexHome = env.CODEX_HOME || path2.join(home, ".codex");
+  const f = findRollout(path2.join(codexHome, "sessions"), null, threadId);
+  return f ? readMeta(f)?.cwd || null : null;
+}
+function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
+  const codexHome = env.CODEX_HOME || path2.join(home, ".codex");
+  const sessionsDir = path2.join(codexHome, "sessions");
+  const rollout = findRollout(sessionsDir, cwd, sessionId);
+  if (!rollout) {
+    return { error: `no Codex rollout found for ${sessionId ? `session ${sessionId}` : `cwd ${cwd}`} under ${sessionsDir}` };
+  }
+  const meta = readMeta(rollout);
+  const bootstrap = /* @__PURE__ */ new Map();
+  const skills = /* @__PURE__ */ new Map();
+  const mcp = /* @__PURE__ */ new Set();
+  const disabledPlugins = /* @__PURE__ */ new Set();
+  const agentsTexts = [];
+  const addText = (t) => {
+    if (typeof t === "string" && t) agentsTexts.push(t);
+  };
+  const addDir = (dir) => {
+    if (dir) bootstrap.set(dir, { path: path2.join(dir, "AGENTS.md"), dir, inferred: true });
+  };
+  for (const line of fs2.readFileSync(rollout, "utf8").split("\n")) {
+    if (!line) continue;
+    const isMsg = line.includes('"type":"message"');
+    const isWorld = line.includes('"type":"world_state"') || line.includes('"type":"turn_context"');
+    const isCall = line.includes("mcp__") || line.includes("mcp_tool_call");
+    if (!isMsg && !isWorld && !isCall) continue;
+    let r;
+    try {
+      r = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    const p = r.payload || {};
+    if (r.type === "response_item" && p.type === "message" && (p.role === "user" || p.role === "developer")) {
+      const t = textOf(p);
+      if (t.startsWith("# AGENTS.md instructions for ")) {
+        for (const m of t.matchAll(/^# AGENTS\.md instructions for (.+)$/gm)) addDir(m[1].trim());
+        addText(t);
+      }
+      if (p.role === "developer" && t.startsWith("<skills_instructions>")) {
+        skills.clear();
+        for (const s of parseSkills(t)) skills.set(`${s.name}\0${s.path}`, s);
+      }
+    } else if (r.type === "world_state") {
+      addDir(p.state?.agents_md?.directory);
+      addText(p.state?.agents_md?.text);
+    } else if (r.type === "turn_context") {
+      for (const id of p.disabled_plugin_ids || []) disabledPlugins.add(id);
+    } else if (r.type === "response_item" && /function_call|tool_call/.test(p.type || "") && typeof p.name === "string") {
+      const m = /^mcp__(.+?)__/.exec(p.name);
+      if (m) mcp.add(m[1]);
+    } else if (r.type === "event_msg" && /^mcp_tool_call/.test(p.type || "")) {
+      const s = p.invocation?.server;
+      if (s) mcp.add(s);
+    }
+  }
+  resolveAgentsFiles(bootstrap, agentsTexts, codexHome);
+  return {
+    source: rollout,
+    sessionId: meta?.id || path2.basename(rollout, ".jsonl").replace(/^rollout-.*?T[\d-]+-/, ""),
+    cwd: meta?.cwd || null,
+    observed: {
+      bootstrap: [...bootstrap.values()].sort((a, b) => a.path.localeCompare(b.path)),
+      skills: [...skills.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)),
+      mcpServers: [...mcp].sort(),
+      // Servers Codex logged as configured-but-not-ready ("omitting MCP server without an exact ready client").
+      // Positive evidence of a ready server is not logged, so this is not part of mcpServers.
+      mcpOmitted: omittedMcp(codexHome, meta?.id),
+      disabledPlugins: [...disabledPlugins].sort(),
+      hooks: []
+    }
+  };
+}
+var require2, realOr, textOf;
+var init_codex = __esm({
+  "src/live/codex.js"() {
+    require2 = createRequire(import.meta.url);
+    realOr = (p) => {
+      try {
+        return fs2.realpathSync(p);
+      } catch {
+        return p;
+      }
+    };
+    textOf = (payload) => (payload.content || []).map((c) => c?.text || "").join("\n");
+  }
+});
+
 // src/session.js
 import { execFileSync } from "node:child_process";
-import path2 from "node:path";
+import path3 from "node:path";
+import os from "node:os";
 function ps(pid) {
   try {
     const out = execFileSync("ps", ["-o", "ppid=,comm=", "-p", String(pid)], { encoding: "utf8" }).trim();
@@ -9291,15 +9516,25 @@ function detectSession(env = process.env, startPid = process.ppid) {
       pid = info.ppid;
     }
   }
+  let argv = null;
   if (s.pid) {
-    const cwd = processCwd(s.pid);
+    argv = processArgs(s.pid);
+    const host = argv && /(?:^| )(app-server|exec-server)(?: |$)/.test(argv.join(" "));
+    const cwd = host ? null : processCwd(s.pid);
     if (cwd) {
-      s.bootCwd = path2.resolve(cwd);
+      s.bootCwd = path3.resolve(cwd);
       s.detectedBy.push("process-cwd");
     }
-    const argv = processArgs(s.pid);
-    if (argv) s.launch = parseLaunchFlags(argv, s.bootCwd || process.cwd());
+    if (host) s.detectedBy.push("codex-host-process");
   }
+  if (s.harness === "codex" && s.sessionId) {
+    const cwd = codexThreadCwd({ home: os.homedir(), env, threadId: s.sessionId });
+    if (cwd) {
+      s.bootCwd = path3.resolve(cwd);
+      s.detectedBy.push("codex-rollout-cwd");
+    }
+  }
+  if (argv) s.launch = parseLaunchFlags(argv, s.bootCwd || process.cwd());
   return s;
 }
 function processArgs(pid) {
@@ -9336,7 +9571,7 @@ function parseLaunchFlags(argv, baseDir) {
           val = { inline: null, unparsed: true };
         }
       } else if (key !== "configOverrides" && key !== "profile") {
-        val = { path: path2.resolve(baseDir, val) };
+        val = { path: path3.resolve(baseDir, val) };
       }
       (launch[key] ||= []).push(val);
     } else if (BOOL[flag]) {
@@ -9349,6 +9584,7 @@ function parseLaunchFlags(argv, baseDir) {
 var HARNESS_BY_COMM, MULTI, BOOL;
 var init_session = __esm({
   "src/session.js"() {
+    init_codex();
     HARNESS_BY_COMM = [
       [/(^|\/)claude$/, "claude"],
       [/(^|\/)codex$|codex-[a-z0-9_-]+$/, "codex"],
@@ -9371,7 +9607,7 @@ var init_session = __esm({
 });
 
 // src/harness/claude.js
-import path3 from "node:path";
+import path4 from "node:path";
 function globToRegex(g) {
   let re = "";
   for (let i = 0; i < g.length; i++) {
@@ -9402,8 +9638,8 @@ function auditClaude(ctx) {
     return it;
   };
   const projectRoot = findRoot(cwd) || cwd;
-  const userDir = path3.join(home, ".claude");
-  const claudeJsonPath = path3.join(home, ".claude.json");
+  const userDir = path4.join(home, ".claude");
+  const claudeJsonPath = path4.join(home, ".claude.json");
   const loadJson = (p) => {
     const d = readJson(p);
     if (d && d.__parseError) {
@@ -9429,18 +9665,18 @@ function auditClaude(ctx) {
     const data = loadJson(p);
     if (data && typeof data === "object") sources.push({ scope, path: p, data, via });
   };
-  addSource("user", path3.join(userDir, "settings.json"));
+  addSource("user", path4.join(userDir, "settings.json"));
   const settingsDirs = [cwd];
-  for (const d of settingsDirs) addSource("project", path3.join(d, ".claude", "settings.json"));
-  for (const d of settingsDirs) addSource("local", path3.join(d, ".claude", "settings.local.json"));
+  for (const d of settingsDirs) addSource("project", path4.join(d, ".claude", "settings.json"));
+  for (const d of settingsDirs) addSource("local", path4.join(d, ".claude", "settings.local.json"));
   for (const s of asArray(launch.settings)) {
     if (s.path) addSource("local", s.path, "--settings");
     else if (s.inline && typeof s.inline === "object") sources.push({ scope: "local", path: "inline:--settings", data: s.inline, via: "--settings" });
   }
-  addSource("managed", path3.join(managedDir, "managed-settings.json"));
-  const mdDir = path3.join(managedDir, "managed-settings.d");
+  addSource("managed", path4.join(managedDir, "managed-settings.json"));
+  const mdDir = path4.join(managedDir, "managed-settings.d");
   for (const e of listDir(mdDir).filter((x) => x.name.endsWith(".json")).sort((a, b) => a.name.localeCompare(b.name))) {
-    addSource("managed", path3.join(mdDir, e.name));
+    addSource("managed", path4.join(mdDir, e.name));
   }
   if (!trusted && sources.some((s) => s.scope === "project")) {
     warnings.push("folder has no recorded trust in ~/.claude.json: project settings.json MCP approval keys and project hooks may be ignored");
@@ -9462,7 +9698,7 @@ function auditClaude(ctx) {
   const nonManagedDisable = scalar("disableAllHooks", (s) => s.scope !== "managed").v === true;
   const managedDisable = scalar("disableAllHooks", (s) => s.scope === "managed").v === true;
   let order = 0;
-  const excludes = union("claudeMdExcludes").map((g) => globToRegex(g.startsWith("~/") ? path3.join(home, g.slice(2)) : g));
+  const excludes = union("claudeMdExcludes").map((g) => globToRegex(g.startsWith("~/") ? path4.join(home, g.slice(2)) : g));
   const isExcluded = (p) => excludes.some((r) => r.test(p));
   const seenBoot = /* @__PURE__ */ new Set();
   function addBootstrap(p, scope, status0, extra = {}, kind = "bootstrap", hop = 0, importedBy = null, nameOverride = null) {
@@ -9489,7 +9725,7 @@ function auditClaude(ctx) {
     const { reason: _r, ...rest } = extra;
     const it = push({
       kind,
-      name: nameOverride || path3.basename(p),
+      name: nameOverride || path4.basename(p),
       scope,
       status,
       path: p,
@@ -9509,8 +9745,8 @@ function auditClaude(ctx) {
     const tries = [raw, raw.replace(/[.,;:!?]+$/, "")];
     for (const t of tries) {
       let q = t.replace(/\\ /g, " ");
-      if (q === "~" || q.startsWith("~/")) q = path3.join(home, q.slice(1));
-      const abs = path3.isAbsolute(q) ? q : path3.resolve(path3.dirname(fromFile), q);
+      if (q === "~" || q.startsWith("~/")) q = path4.join(home, q.slice(1));
+      const abs = path4.isAbsolute(q) ? q : path4.resolve(path4.dirname(fromFile), q);
       if (isFile(abs)) return abs;
     }
     return null;
@@ -9525,7 +9761,7 @@ function auditClaude(ctx) {
       if (!abs) continue;
       let status = parentItem.status;
       let reason;
-      const external = !abs.startsWith(cwd + path3.sep) && abs !== cwd;
+      const external = !abs.startsWith(cwd + path4.sep) && abs !== cwd;
       if (external && scope !== "user" && scope !== "managed") {
         const approved = projCfgs.some((c) => c.hasClaudeMdExternalIncludesApproved === true);
         if (!approved) {
@@ -9545,9 +9781,9 @@ function auditClaude(ctx) {
     const out = [];
     const rec = (d, rel) => {
       for (const e of listDir(d).sort((a, b) => a.name.localeCompare(b.name))) {
-        const p = path3.join(d, e.name);
-        if (isDir(p)) rec(p, path3.join(rel, e.name));
-        else if (e.name.endsWith(".md") && isFile(p)) out.push([p, path3.join(rel, e.name)]);
+        const p = path4.join(d, e.name);
+        if (isDir(p)) rec(p, path4.join(rel, e.name));
+        else if (e.name.endsWith(".md") && isFile(p)) out.push([p, path4.join(rel, e.name)]);
       }
     };
     rec(dir, "");
@@ -9556,17 +9792,17 @@ function auditClaude(ctx) {
       addBootstrap(p, scope, r.status, r.extra, "rule", 0, null, rel);
     }
   }
-  if (isFile(path3.join(managedDir, "CLAUDE.md"))) addBootstrap(path3.join(managedDir, "CLAUDE.md"), "managed", "active");
-  const userMd = path3.join(userDir, "CLAUDE.md");
+  if (isFile(path4.join(managedDir, "CLAUDE.md"))) addBootstrap(path4.join(managedDir, "CLAUDE.md"), "managed", "active");
+  const userMd = path4.join(userDir, "CLAUDE.md");
   if (isFile(userMd)) addBootstrap(userMd, "user", "active");
-  walkRules(path3.join(userDir, "rules"), "user");
+  walkRules(path4.join(userDir, "rules"), "user");
   const chain = ancestors(cwd).reverse();
   const agentsCandidates = [];
   let haveClaudeMd = false;
   for (const d of chain) {
     const scopeFor = d === cwd || d === projectRoot ? "project" : "ancestor";
     for (const [rel, scope] of [["CLAUDE.md", scopeFor], [".claude/CLAUDE.md", scopeFor], ["CLAUDE.local.md", "local"]]) {
-      const p = path3.join(d, rel);
+      const p = path4.join(d, rel);
       if (!isFile(p)) continue;
       if (canonical(p) === canonical(userMd)) continue;
       const t = readText(p);
@@ -9575,30 +9811,30 @@ function auditClaude(ctx) {
       addBootstrap(p, scope, "active");
     }
     for (const rel of ["AGENTS.md", ".claude/AGENTS.md"]) {
-      const p = path3.join(d, rel);
+      const p = path4.join(d, rel);
       if (isFile(p)) agentsCandidates.push([p, scopeFor]);
     }
   }
   for (const [p, scope] of agentsCandidates) {
     if (haveClaudeMd) {
-      push({ kind: "bootstrap", name: path3.basename(p), scope, status: "shadowed", path: p, reason: "AGENTS.md ignored: a CLAUDE.md/CLAUDE.local.md exists in cwd or above", details: { bytes: fileSize(p) } });
+      push({ kind: "bootstrap", name: path4.basename(p), scope, status: "shadowed", path: p, reason: "AGENTS.md ignored: a CLAUDE.md/CLAUDE.local.md exists in cwd or above", details: { bytes: fileSize(p) } });
     } else addBootstrap(p, scope, "active", { reason: "AGENTS.md fallback: no CLAUDE.md found" });
   }
-  for (const d of /* @__PURE__ */ new Set([projectRoot, cwd])) walkRules(path3.join(d, ".claude", "rules"), "project");
-  const memFile = path3.join(userDir, "projects", projectRoot.replace(/[^a-zA-Z0-9]/g, "-"), "memory", "MEMORY.md");
+  for (const d of /* @__PURE__ */ new Set([projectRoot, cwd])) walkRules(path4.join(d, ".claude", "rules"), "project");
+  const memFile = path4.join(userDir, "projects", projectRoot.replace(/[^a-zA-Z0-9]/g, "-"), "memory", "MEMORY.md");
   if (isFile(memFile)) addBootstrap(memFile, "user", "active", { autoMemory: true, reason: "auto memory index (first 200 lines / 25KB)" });
   const addDirs = asArray(launch.addDirs).map((d) => d.path).filter(Boolean);
   for (const d of addDirs) {
     for (const rel of ["CLAUDE.md", ".claude/CLAUDE.md", "CLAUDE.local.md"]) {
-      const p = path3.join(d, rel);
+      const p = path4.join(d, rel);
       if (isFile(p)) addBootstrap(p, rel === "CLAUDE.local.md" ? "local" : "project", "active", { via: "--add-dir" });
     }
-    walkRules(path3.join(d, ".claude", "rules"), "project");
+    walkRules(path4.join(d, ".claude", "rules"), "project");
   }
   for (const [key, flag, reason] of [["appendSystemPromptFiles", "--append-system-prompt-file", "appended to the system prompt"], ["systemPromptFiles", "--system-prompt-file", "replaces the default system prompt"]]) {
     for (const f of asArray(launch[key])) {
       if (!f.path) continue;
-      push({ kind: "bootstrap", name: path3.basename(f.path), scope: "local", status: isFile(f.path) ? "active" : "unknown", path: f.path, reason, details: { order: ++order, bytes: fileSize(f.path), via: flag } });
+      push({ kind: "bootstrap", name: path4.basename(f.path), scope: "local", status: isFile(f.path) ? "active" : "unknown", path: f.path, reason, details: { order: ++order, bytes: fileSize(f.path), via: flag } });
     }
   }
   const hookKeys = /* @__PURE__ */ new Set();
@@ -9639,26 +9875,26 @@ function auditClaude(ctx) {
     const disabled = s.scope === "managed" ? managedDisable : nonManagedDisable || managedDisable;
     addHooks(s.data.hooks, { scope: s.scope, path: s.path, disabled, dedupe: true, via: s.via });
   }
-  const installedPath = path3.join(userDir, "plugins", "installed_plugins.json");
+  const installedPath = path4.join(userDir, "plugins", "installed_plugins.json");
   const installed = loadJson(installedPath)?.plugins || {};
   const activePlugins = [];
-  const knownMkts = loadJson(path3.join(userDir, "plugins", "known_marketplaces.json")) || {};
+  const knownMkts = loadJson(path4.join(userDir, "plugins", "known_marketplaces.json")) || {};
   const mktCache = {};
   function marketplaceEntry(id) {
     const [pname, mkt] = id.split("@");
     if (!mkt || !knownMkts[mkt]) return null;
-    mktCache[mkt] ??= loadJson(path3.join(knownMkts[mkt].installLocation || "", ".claude-plugin", "marketplace.json")) || {};
+    mktCache[mkt] ??= loadJson(path4.join(knownMkts[mkt].installLocation || "", ".claude-plugin", "marketplace.json")) || {};
     return asArray(mktCache[mkt].plugins).find((e) => e.name === pname) || null;
   }
   for (const [id, entries] of Object.entries(installed)) {
     const apps = asArray(entries).filter((e2) => {
-      if (e2.scope === "project" || e2.scope === "local") return e2.projectPath && [cwd, projectRoot].some((k) => k === e2.projectPath || k.startsWith(e2.projectPath + path3.sep));
+      if (e2.scope === "project" || e2.scope === "local") return e2.projectPath && [cwd, projectRoot].some((k) => k === e2.projectPath || k.startsWith(e2.projectPath + path4.sep));
       return true;
     });
     if (!apps.length) continue;
     const e = apps.find((x) => x.scope === "project" || x.scope === "local") || apps[0];
     const root = e.installPath;
-    const manifestPath = path3.join(root, ".claude-plugin", "plugin.json");
+    const manifestPath = path4.join(root, ".claude-plugin", "plugin.json");
     const manifest = isFile(manifestPath) ? loadJson(manifestPath) || {} : {};
     const en = enabledPlugins[id];
     let status;
@@ -9697,20 +9933,20 @@ function auditClaude(ctx) {
       warnings.push(`--plugin-dir not found: ${root}`);
       continue;
     }
-    const manifestPath = path3.join(root, ".claude-plugin", "plugin.json");
+    const manifestPath = path4.join(root, ".claude-plugin", "plugin.json");
     const manifest = isFile(manifestPath) ? loadJson(manifestPath) || {} : {};
-    const name = manifest.name || path3.basename(root);
+    const name = manifest.name || path4.basename(root);
     const id = `${name}@inline`;
     push({ kind: "plugin", name: id, scope: "local", status: "active", reason: "loaded via --plugin-dir", path: isFile(manifestPath) ? manifestPath : root, details: { installPath: root, description: manifest.description, via: "--plugin-dir" } });
     activePlugins.push({ id, name, root, manifest, manifestPath });
   }
   for (const pl of activePlugins) {
     const base = { scope: "plugin", plugin: pl.id, disabled: nonManagedDisable || managedDisable };
-    const hooksJson = path3.join(pl.root, "hooks", "hooks.json");
+    const hooksJson = path4.join(pl.root, "hooks", "hooks.json");
     if (isFile(hooksJson)) addHooks(loadJson(hooksJson)?.hooks, { ...base, path: hooksJson });
     for (const h of asArray(pl.manifest.hooks)) {
       if (typeof h === "string") {
-        const hp = path3.resolve(pl.root, h);
+        const hp = path4.resolve(pl.root, h);
         if (isFile(hp)) addHooks(loadJson(hp)?.hooks, { ...base, path: hp });
       } else addHooks(h, { ...base, path: pl.manifestPath });
     }
@@ -9730,7 +9966,7 @@ function auditClaude(ctx) {
     if (extra.via) details.via = extra.via;
     mcpCands.push({ name, scope, rank: RANK[scope], status: extra.status || "active", reason: extra.reason, path: p, plugin: extra.plugin, definedIn: extra.definedIn, cli: !!extra.via, url: cfg.url ? String(cfg.url).replace(/\/+$/, "").toLowerCase() : void 0, details: redact(details) });
   }
-  const managedMcp = path3.join(managedDir, "managed-mcp.json");
+  const managedMcp = path4.join(managedDir, "managed-mcp.json");
   if (isFile(managedMcp)) {
     const d = loadJson(managedMcp);
     for (const [n, c] of Object.entries(d?.mcpServers || {})) addMcp(n, c, "managed", managedMcp);
@@ -9753,7 +9989,7 @@ function auditClaude(ctx) {
   const mcpJsonDirs = ancestors(cwd);
   const seenMcpNames = /* @__PURE__ */ new Set();
   for (const dir of mcpJsonDirs) {
-    const mcpJson = path3.join(dir, ".mcp.json");
+    const mcpJson = path4.join(dir, ".mcp.json");
     if (!isFile(mcpJson)) continue;
     const d = loadJson(mcpJson);
     for (const [n, c] of Object.entries(d?.mcpServers || {})) {
@@ -9788,10 +10024,10 @@ function auditClaude(ctx) {
   }
   for (const [n, c] of Object.entries(claudeJson.mcpServers || {})) addMcp(n, c, "user", claudeJsonPath);
   for (const pl of activePlugins) {
-    const files = [path3.join(pl.root, ".mcp.json")];
+    const files = [path4.join(pl.root, ".mcp.json")];
     const inline = [];
     for (const m of asArray(pl.manifest.mcpServers)) {
-      if (typeof m === "string") files.push(path3.resolve(pl.root, m));
+      if (typeof m === "string") files.push(path4.resolve(pl.root, m));
       else inline.push(m);
     }
     const defs2 = [];
@@ -9862,26 +10098,26 @@ function auditClaude(ctx) {
     return d;
   };
   function skillFromDir(dir, scope, prefix, plugin, rootFallback = false) {
-    const f = path3.join(dir, "SKILL.md");
+    const f = path4.join(dir, "SKILL.md");
     if (!isFile(f)) return;
     const fm = readFrontmatter(f);
-    const n = String(rootFallback ? fm?.data?.name || path3.basename(dir) : path3.basename(dir));
+    const n = String(rootFallback ? fm?.data?.name || path4.basename(dir) : path4.basename(dir));
     const alias = fm?.data?.name && String(fm.data.name) !== n ? String(fm.data.name) : null;
     defs.skill.push({ name: prefix ? `${prefix}:${n}` : n, scope, path: f, plugin, fm, alias });
   }
   let rootDir = null;
   function skillsIn(dir, scope, prefix, plugin) {
-    if (isFile(path3.join(dir, "SKILL.md"))) {
+    if (isFile(path4.join(dir, "SKILL.md"))) {
       skillFromDir(dir, scope, prefix, plugin, scope === "plugin" && dir === rootDir);
       return;
     }
-    for (const s of subdirs(dir)) skillFromDir(path3.join(dir, s), scope, prefix, plugin);
+    for (const s of subdirs(dir)) skillFromDir(path4.join(dir, s), scope, prefix, plugin);
   }
   function mdFiles(dir) {
     const out = [];
     const rec = (d, rel) => {
       for (const e of listDir(d).sort((a, b) => a.name.localeCompare(b.name))) {
-        const p = path3.join(d, e.name);
+        const p = path4.join(d, e.name);
         if (isDir(p)) rec(p, [...rel, e.name]);
         else if (e.name.endsWith(".md") && isFile(p)) out.push([p, [...rel, e.name.slice(0, -3)]]);
       }
@@ -9907,31 +10143,31 @@ function auditClaude(ctx) {
     const rp = canonical(cdir);
     if (seenDirs.has(rp + scope)) return;
     seenDirs.add(rp + scope);
-    skillsIn(path3.join(cdir, "skills"), scope);
-    cmdsIn(path3.join(cdir, "commands"), scope);
-    agentsIn(path3.join(cdir, "agents"), scope);
+    skillsIn(path4.join(cdir, "skills"), scope);
+    cmdsIn(path4.join(cdir, "commands"), scope);
+    agentsIn(path4.join(cdir, "agents"), scope);
   };
-  scanClaudeDir(managedDir.endsWith(".claude") ? managedDir : path3.join(managedDir, ".claude"), "managed");
+  scanClaudeDir(managedDir.endsWith(".claude") ? managedDir : path4.join(managedDir, ".claude"), "managed");
   scanClaudeDir(userDir, "user");
-  const syncedRoot = path3.join(userDir, "skills", "synced");
-  for (const bucket of subdirs(syncedRoot)) skillsIn(path3.join(syncedRoot, bucket), "user", "anthropic-skills");
+  const syncedRoot = path4.join(userDir, "skills", "synced");
+  for (const bucket of subdirs(syncedRoot)) skillsIn(path4.join(syncedRoot, bucket), "user", "anthropic-skills");
   const userReal = canonical(userDir);
   for (const d of ancestors(cwd, projectRoot)) {
-    if (canonical(path3.join(d, ".claude")) === userReal) continue;
-    scanClaudeDir(path3.join(d, ".claude"), "project");
+    if (canonical(path4.join(d, ".claude")) === userReal) continue;
+    scanClaudeDir(path4.join(d, ".claude"), "project");
   }
-  for (const d of addDirs) scanClaudeDir(path3.join(d, ".claude"), "project");
+  for (const d of addDirs) scanClaudeDir(path4.join(d, ".claude"), "project");
   for (const pl of activePlugins) {
     const m = pl.manifest;
     const pre = pl.name;
-    const resolve = (p) => path3.resolve(pl.root, p);
+    const resolve = (p) => path4.resolve(pl.root, p);
     rootDir = pl.root;
     const entrySkills = asArray(pl.entry?.skills);
     if (entrySkills.length) for (const sk of entrySkills) skillsIn(resolve(sk), "plugin", pre, pl.id);
-    else if (isDir(path3.join(pl.root, "skills"))) skillsIn(path3.join(pl.root, "skills"), "plugin", pre, pl.id);
-    else if (isFile(path3.join(pl.root, "SKILL.md")) && !m.skills) skillFromDir(pl.root, "plugin", pre, pl.id, true);
+    else if (isDir(path4.join(pl.root, "skills"))) skillsIn(path4.join(pl.root, "skills"), "plugin", pre, pl.id);
+    else if (isFile(path4.join(pl.root, "SKILL.md")) && !m.skills) skillFromDir(pl.root, "plugin", pre, pl.id, true);
     for (const s of asArray(m.skills)) skillsIn(resolve(s), "plugin", pre, pl.id);
-    if (m.commands == null) cmdsIn(path3.join(pl.root, "commands"), "plugin", pre, pl.id);
+    if (m.commands == null) cmdsIn(path4.join(pl.root, "commands"), "plugin", pre, pl.id);
     else if (typeof m.commands === "object" && !Array.isArray(m.commands)) {
       for (const [n, v] of Object.entries(m.commands)) {
         const p = v?.source ? resolve(v.source) : pl.manifestPath;
@@ -9941,16 +10177,16 @@ function auditClaude(ctx) {
       for (const c of asArray(m.commands)) {
         const p = resolve(c);
         if (isDir(p)) cmdsIn(p, "plugin", pre, pl.id);
-        else if (isFile(p)) defs.command.push({ name: `${pre}:${path3.basename(p, ".md")}`, scope: "plugin", path: p, plugin: pl.id, fm: readFrontmatter(p) });
+        else if (isFile(p)) defs.command.push({ name: `${pre}:${path4.basename(p, ".md")}`, scope: "plugin", path: p, plugin: pl.id, fm: readFrontmatter(p) });
       }
     }
-    if (m.agents == null) agentsIn(path3.join(pl.root, "agents"), "plugin", pre, pl.id);
+    if (m.agents == null) agentsIn(path4.join(pl.root, "agents"), "plugin", pre, pl.id);
     else {
       for (const a of asArray(m.agents)) {
         const p = resolve(a);
         if (!isFile(p)) continue;
         const fm = readFrontmatter(p);
-        defs.agent.push({ name: `${pre}:${String(fm?.data?.name || path3.basename(p, ".md"))}`, scope: "plugin", path: p, plugin: pl.id, fm });
+        defs.agent.push({ name: `${pre}:${String(fm?.data?.name || path4.basename(p, ".md"))}`, scope: "plugin", path: p, plugin: pl.id, fm });
       }
     }
   }
@@ -10029,8 +10265,8 @@ var init_claude = __esm({
 });
 
 // src/harness/codex.js
-import fs2 from "node:fs";
-import path4 from "node:path";
+import fs3 from "node:fs";
+import path5 from "node:path";
 function sameFile(a, b) {
   return real(a) === real(b);
 }
@@ -10038,7 +10274,7 @@ function auditCodex(ctx) {
   const home = ctx.home;
   const env = ctx.env || {};
   const cwd = canonical(ctx.cwd);
-  const codexHome = env.CODEX_HOME || path4.join(home, ".codex");
+  const codexHome = env.CODEX_HOME || path5.join(home, ".codex");
   const sysDir = ctx.systemDir || "/etc/codex";
   const warnings = [];
   const items = [];
@@ -10052,13 +10288,13 @@ function auditCodex(ctx) {
     }
     return t;
   };
-  const sysCfgPath = path4.join(sysDir, "config.toml");
-  const userCfgPath = path4.join(codexHome, "config.toml");
+  const sysCfgPath = path5.join(sysDir, "config.toml");
+  const userCfgPath = path5.join(codexHome, "config.toml");
   const sysCfg = loadToml(sysCfgPath) || {};
   const userCfg = loadToml(userCfgPath) || {};
   const launch = ctx.launch || {};
   const profName = [].concat(launch.profile || []).filter(Boolean).pop() || userCfg.profile || sysCfg.profile || null;
-  const profPath = profName ? path4.join(codexHome, `${profName}.config.toml`) : null;
+  const profPath = profName ? path5.join(codexHome, `${profName}.config.toml`) : null;
   const profFile = profPath ? loadToml(profPath) : null;
   const profInline = profName && isObj(userCfg.profiles?.[profName]) ? userCfg.profiles[profName] : null;
   if (profName && !profFile && !profInline) warnings.push(`profile "${profName}" selected but ${profPath} not found`);
@@ -10097,9 +10333,9 @@ function auditCodex(ctx) {
   const projects = { ...sysCfg.projects || {}, ...userCfg.projects || {} };
   const trust = resolveTrust(projects, projectRoot, cwd);
   const trusted = trust.trusted;
-  const projLayers = dirs.map((d) => ({ dir: d, codexDir: path4.join(d, ".codex"), scope: scopeOf(d) })).filter((l) => isDir(l.codexDir) && !sameFile(l.codexDir, codexHome));
+  const projLayers = dirs.map((d) => ({ dir: d, codexDir: path5.join(d, ".codex"), scope: scopeOf(d) })).filter((l) => isDir(l.codexDir) && !sameFile(l.codexDir, codexHome));
   const projCfgs = projLayers.map((l) => {
-    const p = path4.join(l.codexDir, "config.toml");
+    const p = path5.join(l.codexDir, "config.toml");
     return { ...l, cfgPath: p, cfg: loadToml(p) };
   });
   const chain = [
@@ -10119,28 +10355,28 @@ function auditCodex(ctx) {
   const trustDetails = { trustMatch: trust.match, ...trust.via ? { trustedVia: trust.via } : {} };
   let order = 0;
   const empty = (p) => (readText(p) ?? "").trim().length === 0;
-  const globalCands = AGENTS_NAMES.map((n) => path4.join(codexHome, n)).filter(isFile);
+  const globalCands = AGENTS_NAMES.map((n) => path5.join(codexHome, n)).filter(isFile);
   let globalChosen = false;
   for (const p of globalCands) {
     const bytes = fileSize(p);
     if (empty(p)) {
-      push({ kind: "bootstrap", name: path4.basename(p), scope: "user", status: "disabled", path: p, reason: "empty", details: { bytes, order: null, global: true } });
+      push({ kind: "bootstrap", name: path5.basename(p), scope: "user", status: "disabled", path: p, reason: "empty", details: { bytes, order: null, global: true } });
     } else if (!globalChosen) {
       globalChosen = true;
-      push({ kind: "bootstrap", name: path4.basename(p), scope: "user", status: "active", path: p, details: { bytes, order: order++, global: true } });
+      push({ kind: "bootstrap", name: path5.basename(p), scope: "user", status: "active", path: p, details: { bytes, order: order++, global: true } });
     } else {
-      push({ kind: "bootstrap", name: path4.basename(p), scope: "user", status: "shadowed", path: p, reason: "only the first non-empty global file is used", details: { bytes, order: null, global: true } });
+      push({ kind: "bootstrap", name: path5.basename(p), scope: "user", status: "shadowed", path: p, reason: "only the first non-empty global file is used", details: { bytes, order: null, global: true } });
     }
   }
   let used = 0;
   const names = [...AGENTS_NAMES, ...fallbacks];
   for (const d of dirs) {
-    const cands = names.map((n) => path4.join(d, n)).filter(isFile);
+    const cands = names.map((n) => path5.join(d, n)).filter(isFile);
     let chosen = false;
     for (const p of cands) {
       if (items.some((i) => i.kind === "bootstrap" && i.path === p)) continue;
       const bytes = fileSize(p);
-      const base_ = { kind: "bootstrap", name: path4.basename(p), scope: scopeOf(d), path: p };
+      const base_ = { kind: "bootstrap", name: path5.basename(p), scope: scopeOf(d), path: p };
       if (empty(p)) {
         push({ ...base_, status: "disabled", reason: "empty", details: { bytes, order: null } });
       } else if (chosen) {
@@ -10162,14 +10398,14 @@ function auditCodex(ctx) {
   }
   const pluginCfg = { ...sysCfg.plugins || {}, ...userCfg.plugins || {} };
   const activePlugins = [];
-  const cacheRoot = path4.join(codexHome, "plugins", "cache");
+  const cacheRoot = path5.join(codexHome, "plugins", "cache");
   const addPlugin = (id, pc, remote) => {
     const [pname, mkt] = id.split("@");
     const enabled = !(pc && pc.enabled === false);
-    const cacheBase = path4.join(cacheRoot, mkt || "", pname);
-    const versions = isDir(cacheBase) ? [...new Set(listDir(cacheBase).map((e) => path4.join(cacheBase, e.name)).filter(isDir).map(real))].map((p) => ({ dir: p, version: path4.basename(p), mtime: mtime(p) })).sort((a, b) => b.mtime - a.mtime) : [];
+    const cacheBase = path5.join(cacheRoot, mkt || "", pname);
+    const versions = isDir(cacheBase) ? [...new Set(listDir(cacheBase).map((e) => path5.join(cacheBase, e.name)).filter(isDir).map(real))].map((p) => ({ dir: p, version: path5.basename(p), mtime: mtime(p) })).sort((a, b) => b.mtime - a.mtime) : [];
     const picked = versions[0];
-    const manifestPath = picked ? path4.join(picked.dir, ".codex-plugin", "plugin.json") : null;
+    const manifestPath = picked ? path5.join(picked.dir, ".codex-plugin", "plugin.json") : null;
     const manifest = manifestPath && isFile(manifestPath) ? readJson(manifestPath) : null;
     const details = { marketplace: mkt, enabled, ...remote ? { remoteInstalled: true } : {}, ...picked ? { version: picked.version, dir: picked.dir } : {} };
     if (versions.length > 1) {
@@ -10196,10 +10432,10 @@ function auditCodex(ctx) {
   };
   for (const [id, pc] of Object.entries(pluginCfg)) addPlugin(id, pc, false);
   for (const mk2 of listDir(cacheRoot)) {
-    for (const pe of listDir(path4.join(cacheRoot, mk2.name))) {
+    for (const pe of listDir(path5.join(cacheRoot, mk2.name))) {
       const id = `${pe.name}@${mk2.name}`;
       if (id in pluginCfg) continue;
-      if (isFile(path4.join(cacheRoot, mk2.name, pe.name, ".codex-remote-plugin-install.json"))) addPlugin(id, {}, true);
+      if (isFile(path5.join(cacheRoot, mk2.name, pe.name, ".codex-remote-plugin-install.json"))) addPlugin(id, {}, true);
     }
   }
   const mcpEntries = [];
@@ -10250,9 +10486,9 @@ function auditCodex(ctx) {
     let src = null;
     if (isObj(mf)) {
       servers = mf.mcpServers || mf;
-      src = path4.join(pl.dir, ".codex-plugin", "plugin.json");
+      src = path5.join(pl.dir, ".codex-plugin", "plugin.json");
     } else if (typeof mf === "string") {
-      const p = path4.join(pl.dir, mf);
+      const p = path5.join(pl.dir, mf);
       if (isFile(p)) {
         const j = readJson(p);
         if (j?.__parseError) warnings.push(`${p}: ${j.__parseError}`);
@@ -10285,8 +10521,8 @@ function auditCodex(ctx) {
   const disabledSkills = /* @__PURE__ */ new Set();
   for (const sc of skillCfgs) {
     if (!isObj(sc) || sc.enabled !== false || typeof sc.path !== "string") continue;
-    const p = sc.path.startsWith("~") ? path4.join(home, sc.path.slice(1)) : sc.path;
-    disabledSkills.add(real(path4.basename(p) === "SKILL.md" ? path4.dirname(p) : p));
+    const p = sc.path.startsWith("~") ? path5.join(home, sc.path.slice(1)) : sc.path;
+    disabledSkills.add(real(path5.basename(p) === "SKILL.md" ? path5.dirname(p) : p));
   }
   const seenSkillDirs = /* @__PURE__ */ new Set();
   const skillRecs = [];
@@ -10296,29 +10532,29 @@ function auditCodex(ctx) {
     if (seenSkillDirs.has(rr + "|" + scope)) return;
     seenSkillDirs.add(rr + "|" + scope);
     for (const e of listDir(root).sort((a, b) => a.name.localeCompare(b.name))) {
-      const dir = path4.join(root, e.name);
+      const dir = path5.join(root, e.name);
       if (!isDir(dir)) continue;
       if (e.name === ".system" && extra.allowSystem) {
         scanSkills(dir, "builtin", { ...extra, allowSystem: false });
         continue;
       }
       if (e.name.startsWith(".")) continue;
-      const md = path4.join(dir, "SKILL.md");
+      const md = path5.join(dir, "SKILL.md");
       if (!isFile(md)) continue;
       const fm = readFrontmatter(md);
       const name = String(fm?.data?.name || e.name);
       const desc = fm?.data?.description;
       const realDir = real(dir);
-      const off = disabledSkills.has(realDir) || disabledSkills.has(path4.resolve(dir));
+      const off = disabledSkills.has(realDir) || disabledSkills.has(path5.resolve(dir));
       let allowImplicit;
-      const oy = path4.join(realDir, "agents", "openai.yaml");
+      const oy = path5.join(realDir, "agents", "openai.yaml");
       if (isFile(oy)) {
         try {
           allowImplicit = import_yaml2.default.parse(readText(oy))?.policy?.allow_implicit_invocation;
         } catch {
         }
       }
-      const symlink = realDir !== path4.resolve(dir);
+      const symlink = realDir !== path5.resolve(dir);
       const noModel = fm?.data?.["disable-model-invocation"] === true || allowImplicit === false;
       const listName = extra.plugin ? `${extra.pluginName}:${name}` : name;
       skillRecs.push({
@@ -10326,19 +10562,19 @@ function auditCodex(ctx) {
         noModel,
         off,
         scope,
-        dir: path4.resolve(dir),
+        dir: path5.resolve(dir),
         builtin: scope === "builtin",
-        rel: extra.plugin ? path4.relative(path4.dirname(path4.dirname(extra.pluginDir)), path4.join(dir, "SKILL.md")) : `${e.name}/SKILL.md`,
+        rel: extra.plugin ? path5.relative(path5.dirname(path5.dirname(extra.pluginDir)), path5.join(dir, "SKILL.md")) : `${e.name}/SKILL.md`,
         fields: {
           kind: "skill",
           name: listName,
           scope,
-          path: path4.join(realDir, "SKILL.md"),
+          path: path5.join(realDir, "SKILL.md"),
           ...extra.plugin ? { plugin: extra.plugin } : {},
           details: {
-            listedPath: path4.join(path4.resolve(dir), "SKILL.md"),
+            listedPath: path5.join(path5.resolve(dir), "SKILL.md"),
             ...desc ? { description: String(desc).slice(0, 300) } : {},
-            ...symlink ? { symlinkFrom: path4.resolve(dir) } : {},
+            ...symlink ? { symlinkFrom: path5.resolve(dir) } : {},
             ...allowImplicit === false ? { implicitInvocation: false } : {},
             ...fm?.data?.["disable-model-invocation"] === true ? { disableModelInvocation: true } : {},
             ...!fm?.data?.name ? { nameFromDir: true } : {}
@@ -10347,13 +10583,13 @@ function auditCodex(ctx) {
       });
     }
   };
-  for (const d of dirs.slice().reverse()) scanSkills(path4.join(d, ".agents", "skills"), scopeOf(d));
-  scanSkills(path4.join(home, ".agents", "skills"), "user");
-  scanSkills(path4.join(sysDir, "skills"), "managed");
-  scanSkills(path4.join(codexHome, "skills"), "user", { allowSystem: true });
+  for (const d of dirs.slice().reverse()) scanSkills(path5.join(d, ".agents", "skills"), scopeOf(d));
+  scanSkills(path5.join(home, ".agents", "skills"), "user");
+  scanSkills(path5.join(sysDir, "skills"), "managed");
+  scanSkills(path5.join(codexHome, "skills"), "user", { allowSystem: true });
   for (const pl of activePlugins) {
     const sp = typeof pl.manifest.skills === "string" ? pl.manifest.skills : "skills";
-    scanSkills(path4.join(pl.dir, sp), "plugin", { plugin: pl.id, pluginName: pl.manifest.name || pl.pname, pluginDir: pl.dir });
+    scanSkills(path5.join(pl.dir, sp), "plugin", { plugin: pl.id, pluginName: pl.manifest.name || pl.pname, pluginDir: pl.dir });
   }
   finalizeSkills();
   function finalizeSkills() {
@@ -10418,7 +10654,7 @@ function auditCodex(ctx) {
   }
   function skillWindow() {
     const model = base.model;
-    const cat = readJson(path4.join(codexHome, "models_cache.json"));
+    const cat = readJson(path5.join(codexHome, "models_cache.json"));
     const m = (cat?.models || []).find((x) => x.slug === model);
     const pinned = Number(base.model_context_window);
     if (Number.isFinite(pinned) && pinned > 0) return { low: pinned, high: pinned, source: "model_context_window config" };
@@ -10464,21 +10700,21 @@ function auditCodex(ctx) {
       });
     }
   };
-  const userHooksJson = path4.join(codexHome, "hooks.json");
+  const userHooksJson = path5.join(codexHome, "hooks.json");
   if (isFile(userHooksJson)) emitHooksJson(userHooksJson, { scope: "user" });
   emitHooks(userCfg.hooks, { scope: "user", path: userCfgPath });
   if (profName) emitHooks(profCfg.hooks, { scope: "user", path: profSrc });
   emitHooks(sysCfg.hooks, { scope: "managed", path: sysCfgPath, managed: true });
   for (const l of projCfgs) emitHooks(l.cfg?.hooks, { scope: l.scope, path: l.cfgPath, project: true, gate: projGate });
   for (const l of projLayers) {
-    const hj = path4.join(l.codexDir, "hooks.json");
+    const hj = path5.join(l.codexDir, "hooks.json");
     if (isFile(hj)) emitHooksJson(hj, { scope: l.scope, project: true, gate: projGate });
   }
   for (const pl of activePlugins) {
     const hm = pl.manifest.hooks;
-    if (isObj(hm)) emitHooks(hm.hooks || hm, { scope: "plugin", plugin: pl.id, path: path4.join(pl.dir, ".codex-plugin", "plugin.json"), definedIn: userCfgPath });
+    if (isObj(hm)) emitHooks(hm.hooks || hm, { scope: "plugin", plugin: pl.id, path: path5.join(pl.dir, ".codex-plugin", "plugin.json"), definedIn: userCfgPath });
     else {
-      const p = path4.join(pl.dir, typeof hm === "string" ? hm : path4.join("hooks", "hooks.json"));
+      const p = path5.join(pl.dir, typeof hm === "string" ? hm : path5.join("hooks", "hooks.json"));
       if (isFile(p)) emitHooksJson(p, { scope: "plugin", plugin: pl.id, definedIn: userCfgPath });
     }
   }
@@ -10504,15 +10740,15 @@ function auditCodex(ctx) {
   const emitRules = (dir, o) => {
     for (const e of listDir(dir).sort((a, b) => a.name.localeCompare(b.name))) {
       if (!e.name.endsWith(".rules")) continue;
-      const p = path4.join(dir, e.name);
+      const p = path5.join(dir, e.name);
       if (!isFile(p)) continue;
       const count = (readText(p) || "").match(/^\s*prefix_rule\s*\(/gm)?.length || 0;
       push({ kind: "rule", name: e.name, scope: o.scope, status: "active", path: p, ...o.gate || {}, details: { count, ...o.project ? trustDetails : {} } });
     }
   };
-  emitRules(path4.join(sysDir, "rules"), { scope: "managed" });
-  emitRules(path4.join(codexHome, "rules"), { scope: "user" });
-  for (const l of projLayers) emitRules(path4.join(l.codexDir, "rules"), { scope: l.scope, project: true, gate: projGate });
+  emitRules(path5.join(sysDir, "rules"), { scope: "managed" });
+  emitRules(path5.join(codexHome, "rules"), { scope: "user" });
+  for (const l of projLayers) emitRules(path5.join(l.codexDir, "rules"), { scope: l.scope, project: true, gate: projGate });
   return { harness: H2, projectRoot, chain, items, warnings };
 }
 function deepMerge(a, b) {
@@ -10555,7 +10791,7 @@ function resolveTrust(projects, root, cwd) {
   return { trusted: false, match: "none" };
 }
 var import_yaml2, H2, DEFAULT_MAX_BYTES, windowBudget, AGENTS_NAMES, real, mtime, isObj;
-var init_codex = __esm({
+var init_codex2 = __esm({
   "src/harness/codex.js"() {
     import_yaml2 = __toESM(require_dist(), 1);
     init_dist();
@@ -10567,14 +10803,14 @@ var init_codex = __esm({
     AGENTS_NAMES = ["AGENTS.override.md", "AGENTS.md"];
     real = (p) => {
       try {
-        return fs2.realpathSync(p);
+        return fs3.realpathSync(p);
       } catch {
-        return path4.resolve(p);
+        return path5.resolve(p);
       }
     };
     mtime = (p) => {
       try {
-        return fs2.statSync(p).mtimeMs;
+        return fs3.statSync(p).mtimeMs;
       } catch {
         return 0;
       }
@@ -10584,8 +10820,8 @@ var init_codex = __esm({
 });
 
 // src/harness/opencode.js
-import fs3 from "node:fs";
-import path5 from "node:path";
+import fs4 from "node:fs";
+import path6 from "node:path";
 function mk({ kind, name, scope, status = "active", path: p, reason, details }) {
   const f = { harness: "opencode", kind, name, scope, status, path: p };
   if (reason) f.reason = reason;
@@ -10594,7 +10830,7 @@ function mk({ kind, name, scope, status = "active", path: p, reason, details }) 
 }
 function globalDir(ctx) {
   const xdg = ctx.env?.XDG_CONFIG_HOME;
-  return xdg ? path5.join(xdg, "opencode") : path5.join(ctx.home, ".config", "opencode");
+  return xdg ? path6.join(xdg, "opencode") : path6.join(ctx.home, ".config", "opencode");
 }
 function managedDirFor(ctx) {
   if (ctx.managedDir !== void 0) return ctx.managedDir;
@@ -10639,32 +10875,32 @@ function walkGlob(dir, segs, out) {
   const [seg, ...rest] = segs;
   if (seg === "**") {
     walkGlob(dir, rest, out);
-    for (const s of subdirs(dir)) if (!WALK_SKIP.has(s)) walkGlob(path5.join(dir, s), segs, out);
+    for (const s of subdirs(dir)) if (!WALK_SKIP.has(s)) walkGlob(path6.join(dir, s), segs, out);
     return;
   }
   if (GLOB_CHARS.test(seg)) {
     const re = segRegex(seg);
-    for (const e of listDir(dir)) if (re.test(e.name)) walkGlob(path5.join(dir, e.name), rest, out);
+    for (const e of listDir(dir)) if (re.test(e.name)) walkGlob(path6.join(dir, e.name), rest, out);
     return;
   }
-  walkGlob(path5.join(dir, seg), rest, out);
+  walkGlob(path6.join(dir, seg), rest, out);
 }
 function expandGlob(pattern, base) {
-  const abs = path5.normalize(path5.isAbsolute(pattern) ? pattern : path5.join(base, pattern));
-  const segs = abs.slice(path5.parse(abs).root.length).split(path5.sep).filter(Boolean);
-  let start = path5.parse(abs).root;
+  const abs = path6.normalize(path6.isAbsolute(pattern) ? pattern : path6.join(base, pattern));
+  const segs = abs.slice(path6.parse(abs).root.length).split(path6.sep).filter(Boolean);
+  let start = path6.parse(abs).root;
   let i = 0;
-  while (i < segs.length && !GLOB_CHARS.test(segs[i])) start = path5.join(start, segs[i++]);
+  while (i < segs.length && !GLOB_CHARS.test(segs[i])) start = path6.join(start, segs[i++]);
   const out = [];
   walkGlob(start, segs.slice(i), out);
   return [...new Set(out)].sort();
 }
 function listFiles(dir, re) {
-  return listDir(dir).filter((e) => re.test(e.name) && isFile(path5.join(dir, e.name))).map((e) => path5.join(dir, e.name)).sort();
+  return listDir(dir).filter((e) => re.test(e.name) && isFile(path6.join(dir, e.name))).map((e) => path6.join(dir, e.name)).sort();
 }
 function walkMarkdown(dir, prefix = "", out = []) {
   for (const e of listDir(dir)) {
-    const full = path5.join(dir, e.name);
+    const full = path6.join(dir, e.name);
     if (isDir(full)) {
       walkMarkdown(full, `${prefix}${e.name}/`, out);
     } else if (MD_EXT.test(e.name) && isFile(full)) {
@@ -10677,7 +10913,7 @@ function findSkillFiles(root, depth = 0, out = [], seen = /* @__PURE__ */ new Se
   if (depth > MAX_SKILL_DEPTH) return out;
   let real2;
   try {
-    real2 = fs3.realpathSync(root);
+    real2 = fs4.realpathSync(root);
   } catch {
     return out;
   }
@@ -10685,20 +10921,20 @@ function findSkillFiles(root, depth = 0, out = [], seen = /* @__PURE__ */ new Se
   seen.add(real2);
   for (const s of subdirs(root)) {
     if (WALK_SKIP.has(s)) continue;
-    const dir = path5.join(root, s);
-    const f = path5.join(dir, "SKILL.md");
+    const dir = path6.join(root, s);
+    const f = path6.join(dir, "SKILL.md");
     if (isFile(f)) out.push(f);
     findSkillFiles(dir, depth + 1, out, seen);
   }
   return out;
 }
 function findBinary(env) {
-  for (const d of (env.PATH || "").split(path5.delimiter)) {
+  for (const d of (env.PATH || "").split(path6.delimiter)) {
     if (!d) continue;
-    const p = path5.join(d, "opencode");
+    const p = path6.join(d, "opencode");
     if (isFile(p)) {
       try {
-        return fs3.realpathSync(p);
+        return fs4.realpathSync(p);
       } catch {
         return p;
       }
@@ -10709,7 +10945,7 @@ function findBinary(env) {
 function auditOpencode(ctx) {
   const env = ctx.env || {};
   const home = ctx.home;
-  const cwd = path5.resolve(ctx.cwd);
+  const cwd = path6.resolve(ctx.cwd);
   const warnings = [];
   const items = [];
   const chain = [];
@@ -10723,13 +10959,13 @@ function auditOpencode(ctx) {
   const cfgFiles = [];
   const addCfg = (dir, scope) => {
     for (const n of CONFIG_NAMES) {
-      const f = path5.join(dir, n);
+      const f = path6.join(dir, n);
       if (isFile(f)) cfgFiles.push({ path: f, scope });
     }
   };
   addCfg(gDir, "user");
   if (env.OPENCODE_CONFIG) {
-    const f = path5.resolve(cwd, env.OPENCODE_CONFIG);
+    const f = path6.resolve(cwd, env.OPENCODE_CONFIG);
     if (isFile(f)) cfgFiles.push({ path: f, scope: "user" });
     else warnings.push(`OPENCODE_CONFIG points at a missing file: ${f}`);
   }
@@ -10792,33 +11028,33 @@ function auditOpencode(ctx) {
       }));
       continue;
     }
-    const base = path5.dirname(d.path);
+    const base = path6.dirname(d.path);
     const matches = expandGlob(d.entry, base);
     if (!matches.length) warnings.push(`instructions entry "${d.entry}" in ${d.path} matched no files`);
     for (const f of matches) {
-      items.push(mk({ kind: "rule", name: path5.relative(base, f), scope: d.scope, path: f, details: { bytes: fileSize(f) } }));
+      items.push(mk({ kind: "rule", name: path6.relative(base, f), scope: d.scope, path: f, details: { bytes: fileSize(f) } }));
     }
   }
   const boot = (file, scope, status = "active", reason) => mk({
     kind: "bootstrap",
-    name: path5.basename(file),
+    name: path6.basename(file),
     scope,
     status,
     path: file,
     reason,
     details: { bytes: fileSize(file) }
   });
-  const projAgents = walk.map((d) => path5.join(d, "AGENTS.md")).filter(isFile);
-  const projClaude = walk.map((d) => path5.join(d, "CLAUDE.md")).filter(isFile);
-  for (const f of projAgents) items.push(boot(f, scopeOf(path5.dirname(f))));
+  const projAgents = walk.map((d) => path6.join(d, "AGENTS.md")).filter(isFile);
+  const projClaude = walk.map((d) => path6.join(d, "CLAUDE.md")).filter(isFile);
+  for (const f of projAgents) items.push(boot(f, scopeOf(path6.dirname(f))));
   for (const f of projClaude) {
-    const sc = scopeOf(path5.dirname(f));
+    const sc = scopeOf(path6.dirname(f));
     if (projAgents.length) items.push(boot(f, sc, "shadowed", "CLAUDE.md is used only when no AGENTS.md is found"));
     else if (claudeCodeOff) items.push(boot(f, sc, "disabled", "OPENCODE_DISABLE_CLAUDE_CODE is set"));
     else items.push(boot(f, sc));
   }
-  const gAgents = path5.join(gDir, "AGENTS.md");
-  const gClaude = path5.join(home, ".claude", "CLAUDE.md");
+  const gAgents = path6.join(gDir, "AGENTS.md");
+  const gClaude = path6.join(home, ".claude", "CLAUDE.md");
   if (isFile(gAgents)) items.push(boot(gAgents, "user"));
   if (isFile(gClaude)) {
     if (claudePromptOff) items.push(boot(gClaude, "user", "disabled", "OPENCODE_DISABLE_CLAUDE_CODE(_PROMPT) is set"));
@@ -10826,14 +11062,14 @@ function auditOpencode(ctx) {
     else items.push(boot(gClaude, "user"));
   }
   const skillRoots = [];
-  skillRoots.push({ dir: path5.join(home, ".agents", "skills"), scope: "user" });
-  skillRoots.push({ dir: path5.join(home, ".claude", "skills"), scope: "user", claude: true });
-  skillRoots.push({ dir: path5.join(gDir, "skills"), scope: "user" });
+  skillRoots.push({ dir: path6.join(home, ".agents", "skills"), scope: "user" });
+  skillRoots.push({ dir: path6.join(home, ".claude", "skills"), scope: "user", claude: true });
+  skillRoots.push({ dir: path6.join(gDir, "skills"), scope: "user" });
   for (const dir of [...walk].reverse()) {
     const sc = scopeOf(dir);
-    skillRoots.push({ dir: path5.join(dir, ".agents", "skills"), scope: sc });
-    skillRoots.push({ dir: path5.join(dir, ".claude", "skills"), scope: sc, claude: true });
-    skillRoots.push({ dir: path5.join(dir, ".opencode", "skills"), scope: sc });
+    skillRoots.push({ dir: path6.join(dir, ".agents", "skills"), scope: sc });
+    skillRoots.push({ dir: path6.join(dir, ".claude", "skills"), scope: sc, claude: true });
+    skillRoots.push({ dir: path6.join(dir, ".opencode", "skills"), scope: sc });
   }
   const binary = findBinary(env);
   const skillDefs = [];
@@ -10867,16 +11103,16 @@ function auditOpencode(ctx) {
   for (const d of resolveDefs(skillDefs)) {
     items.push(mk({ kind: "skill", name: d.name, scope: d.scope, status: d.status, path: d.path, reason: d.reason, details: d.details }));
   }
-  const opencodeDirs = [{ base: gDir, scope: "user" }, ...[...walk].reverse().map((d) => ({ base: path5.join(d, ".opencode"), scope: scopeOf(d) }))];
+  const opencodeDirs = [{ base: gDir, scope: "user" }, ...[...walk].reverse().map((d) => ({ base: path6.join(d, ".opencode"), scope: scopeOf(d) }))];
   const hookSeen = /* @__PURE__ */ new Set();
   for (const { base, scope } of opencodeDirs) {
     for (const sub of ["plugins", "plugin"]) {
-      for (const f of listFiles(path5.join(base, sub), SCRIPT_EXT)) {
+      for (const f of listFiles(path6.join(base, sub), SCRIPT_EXT)) {
         if (hookSeen.has(f)) continue;
         hookSeen.add(f);
         items.push(mk({
           kind: "hook",
-          name: path5.basename(f).replace(SCRIPT_EXT, ""),
+          name: path6.basename(f).replace(SCRIPT_EXT, ""),
           scope,
           path: f,
           details: { bytes: fileSize(f), note: HOOK_NOTE }
@@ -10888,7 +11124,7 @@ function auditOpencode(ctx) {
     const defs = [];
     for (const { base, scope } of opencodeDirs) {
       for (const sub of subs) {
-        for (const { name, file } of walkMarkdown(path5.join(base, sub))) {
+        for (const { name, file } of walkMarkdown(path6.join(base, sub))) {
           const description = readFrontmatter(file)?.data?.description;
           defs.push({ name, path: file, scope, details: description ? { description: String(description) } : {} });
         }
@@ -10904,7 +11140,7 @@ function auditOpencode(ctx) {
   return { harness: "opencode", projectRoot, chain, items, warnings };
 }
 function dirNameCheck(file, name, warnings) {
-  const dirName = path5.basename(path5.dirname(file));
+  const dirName = path6.basename(path6.dirname(file));
   if (dirName !== name) {
     warnings.push(`skill frontmatter name "${name}" differs from directory "${dirName}" (${file}); using frontmatter name`);
   }
@@ -10940,27 +11176,27 @@ var init_opencode = __esm({
 });
 
 // src/live/claude.js
-import fs4 from "node:fs";
-import path6 from "node:path";
+import fs5 from "node:fs";
+import path7 from "node:path";
 function redactCommand(cmd) {
   return String(cmd).replace(/\b([A-Za-z0-9_]*(?:token|secret|key|password|passwd|auth)[A-Za-z0-9_]*)=("[^"]*"|'[^']*'|\S+)/gi, "$1=<redacted>").replace(/(Bearer|Basic)\s+[A-Za-z0-9._~+/=-]+/g, "$1 <redacted>");
 }
 function findTranscript({ cwd, home, sessionId }) {
-  const projects = path6.join(home, ".claude", "projects");
+  const projects = path7.join(home, ".claude", "projects");
   const dirs = [cwd];
   try {
-    dirs.push(fs4.realpathSync(cwd));
+    dirs.push(fs5.realpathSync(cwd));
   } catch {
   }
   for (const d of [...new Set(dirs)]) {
-    const dir = path6.join(projects, claudeSlug(d));
-    if (!fs4.existsSync(dir)) continue;
+    const dir = path7.join(projects, claudeSlug(d));
+    if (!fs5.existsSync(dir)) continue;
     if (sessionId) {
-      const p = path6.join(dir, `${sessionId}.jsonl`);
-      if (fs4.existsSync(p)) return p;
+      const p = path7.join(dir, `${sessionId}.jsonl`);
+      if (fs5.existsSync(p)) return p;
       continue;
     }
-    const files = fs4.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => ({ p: path6.join(dir, f), t: fs4.statSync(path6.join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
+    const files = fs5.readdirSync(dir).filter((f) => f.endsWith(".jsonl")).map((f) => ({ p: path7.join(dir, f), t: fs5.statSync(path7.join(dir, f)).mtimeMs })).sort((a, b) => b.t - a.t);
     if (files.length) return files[0].p;
   }
   return null;
@@ -10968,7 +11204,7 @@ function findTranscript({ cwd, home, sessionId }) {
 function liveClaude({ cwd, home, env, sessionId } = {}) {
   const transcript = findTranscript({ cwd, home, sessionId });
   if (!transcript) {
-    return { error: `no Claude transcript found for ${cwd}${sessionId ? ` session ${sessionId}` : ""} under ${path6.join(home, ".claude", "projects", claudeSlug(cwd))}` };
+    return { error: `no Claude transcript found for ${cwd}${sessionId ? ` session ${sessionId}` : ""} under ${path7.join(home, ".claude", "projects", claudeSlug(cwd))}` };
   }
   const bootstrap = /* @__PURE__ */ new Map();
   const skills = /* @__PURE__ */ new Set();
@@ -10985,7 +11221,7 @@ function liveClaude({ cwd, home, env, sessionId } = {}) {
     const command = a.command ? redactCommand(a.command) : null;
     hooks.set(`${event}\0${matcher}\0${command}`, { event, matcher, command });
   };
-  for (const line of fs4.readFileSync(transcript, "utf8").split("\n")) {
+  for (const line of fs5.readFileSync(transcript, "utf8").split("\n")) {
     if (!line.includes('"attachment"')) continue;
     let r;
     try {
@@ -11037,7 +11273,7 @@ function liveClaude({ cwd, home, env, sessionId } = {}) {
   const sortedHooks = [...hooks.values()].sort((x, y) => `${x.event}\0${x.matcher}\0${x.command}`.localeCompare(`${y.event}\0${y.matcher}\0${y.command}`));
   return {
     source: transcript,
-    sessionId: path6.basename(transcript, ".jsonl"),
+    sessionId: path7.basename(transcript, ".jsonl"),
     observed: {
       bootstrap: [...bootstrap.values()].sort((a, b) => a.path.localeCompare(b.path)),
       skills: uniqSorted(skills),
@@ -11057,234 +11293,16 @@ var init_claude2 = __esm({
   }
 });
 
-// src/live/codex.js
-import fs5 from "node:fs";
-import { createRequire } from "node:module";
-import path7 from "node:path";
-function listRollouts(sessionsDir) {
-  const out = [];
-  const sub = (d) => {
-    try {
-      return fs5.readdirSync(d, { withFileTypes: true });
-    } catch {
-      return [];
-    }
-  };
-  const desc = (a, b) => b.name.localeCompare(a.name);
-  for (const y of sub(sessionsDir).filter((e) => e.isDirectory()).sort(desc))
-    for (const m of sub(path7.join(sessionsDir, y.name)).filter((e) => e.isDirectory()).sort(desc))
-      for (const d of sub(path7.join(sessionsDir, y.name, m.name)).filter((e) => e.isDirectory()).sort(desc))
-        for (const f of sub(path7.join(sessionsDir, y.name, m.name, d.name)).filter((e) => e.isFile() && /^rollout-.*\.jsonl$/.test(e.name)).sort(desc))
-          out.push(path7.join(sessionsDir, y.name, m.name, d.name, f.name));
-  return out;
-}
-function readMeta(file) {
-  let fd;
-  try {
-    fd = fs5.openSync(file, "r");
-    const buf = Buffer.alloc(65536);
-    let acc = "";
-    for (; ; ) {
-      const n = fs5.readSync(fd, buf, 0, buf.length, null);
-      if (!n) break;
-      acc += buf.toString("utf8", 0, n);
-      const nl = acc.indexOf("\n");
-      if (nl >= 0) {
-        acc = acc.slice(0, nl);
-        break;
-      }
-      if (acc.length > 4e6) return null;
-    }
-    const r = JSON.parse(acc);
-    return r.type === "session_meta" ? r.payload : null;
-  } catch {
-    return null;
-  } finally {
-    if (fd !== void 0) fs5.closeSync(fd);
-  }
-}
-function findRollout(sessionsDir, cwd, sessionId) {
-  const files = listRollouts(sessionsDir);
-  if (sessionId) {
-    const byName = files.find((f) => f.endsWith(`-${sessionId}.jsonl`));
-    if (byName) return byName;
-    return files.find((f) => readMeta(f)?.id === sessionId) || null;
-  }
-  const want = path7.resolve(cwd);
-  for (const f of files) {
-    const cw = readMeta(f)?.cwd;
-    if (cw && path7.resolve(cw) === want) return f;
-  }
-  return null;
-}
-function parseSkills(text) {
-  const roots = {};
-  const skills = [];
-  for (const line of text.split("\n")) {
-    const rm = /^- `(r\d+)` = `(.+)`$/.exec(line);
-    if (rm) {
-      roots[rm[1]] = rm[2];
-      continue;
-    }
-    if (!line.startsWith("- ")) continue;
-    const fm = /\(file: (\S+)\)\s*$/.exec(line);
-    if (!fm) continue;
-    const head = line.slice(2, fm.index);
-    const colon = head.indexOf(": ");
-    const name = (colon < 0 ? head.replace(/:\s*$/, "") : head.slice(0, colon)).trim();
-    const rel = fm[1];
-    const root = /^(r\d+)\//.exec(rel);
-    const p = root && roots[root[1]] ? path7.join(roots[root[1]], rel.slice(root[1].length + 1)) : rel;
-    skills.push({ name, path: p, realPath: realOr(p) });
-  }
-  return skills;
-}
-function resolveAgentsFiles(bootstrap, texts, codexHome) {
-  if (!texts.length) return;
-  const blob = texts.join("\n");
-  const norm = (x) => x.replace(/\s+/g, " ").trim();
-  const nb = norm(blob);
-  const dirs = /* @__PURE__ */ new Set([codexHome]);
-  for (const d of [...bootstrap.keys()]) {
-    for (let c = d; ; c = path7.dirname(c)) {
-      dirs.add(c);
-      if (path7.dirname(c) === c) break;
-    }
-  }
-  const found = /* @__PURE__ */ new Map();
-  for (const d of dirs) {
-    for (const n of ["AGENTS.override.md", "AGENTS.md"]) {
-      const f = path7.join(d, n);
-      let c;
-      try {
-        c = fs5.readFileSync(f, "utf8");
-      } catch {
-        continue;
-      }
-      if (!c.trim()) continue;
-      if (nb.includes(norm(c))) found.set(f, { path: f, dir: d, inferred: true, contentMatched: true });
-    }
-  }
-  if (!found.size) return;
-  bootstrap.clear();
-  for (const v of found.values()) bootstrap.set(v.path, v);
-}
-function omittedMcp(codexHome, threadId) {
-  if (!threadId) return [];
-  const dbPath = path7.join(codexHome, "logs_2.sqlite");
-  if (!fs5.existsSync(dbPath)) return [];
-  let db;
-  try {
-    const { DatabaseSync } = require2("node:sqlite");
-    db = new DatabaseSync(dbPath, { readOnly: true });
-    const rows = db.prepare("SELECT feedback_log_body AS b FROM logs WHERE thread_id = ? AND feedback_log_body LIKE '%omitting MCP server%'").all(threadId);
-    return [...new Set(rows.map((r) => /server_name=(\S+)/.exec(r.b)?.[1]).filter(Boolean))].sort();
-  } catch {
-    return [];
-  } finally {
-    try {
-      db?.close();
-    } catch {
-    }
-  }
-}
-function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
-  const codexHome = env.CODEX_HOME || path7.join(home, ".codex");
-  const sessionsDir = path7.join(codexHome, "sessions");
-  const rollout = findRollout(sessionsDir, cwd, sessionId);
-  if (!rollout) {
-    return { error: `no Codex rollout found for ${sessionId ? `session ${sessionId}` : `cwd ${cwd}`} under ${sessionsDir}` };
-  }
-  const meta = readMeta(rollout);
-  const bootstrap = /* @__PURE__ */ new Map();
-  const skills = /* @__PURE__ */ new Map();
-  const mcp = /* @__PURE__ */ new Set();
-  const disabledPlugins = /* @__PURE__ */ new Set();
-  const agentsTexts = [];
-  const addText = (t) => {
-    if (typeof t === "string" && t) agentsTexts.push(t);
-  };
-  const addDir = (dir) => {
-    if (dir) bootstrap.set(dir, { path: path7.join(dir, "AGENTS.md"), dir, inferred: true });
-  };
-  for (const line of fs5.readFileSync(rollout, "utf8").split("\n")) {
-    if (!line) continue;
-    const isMsg = line.includes('"type":"message"');
-    const isWorld = line.includes('"type":"world_state"') || line.includes('"type":"turn_context"');
-    const isCall = line.includes("mcp__") || line.includes("mcp_tool_call");
-    if (!isMsg && !isWorld && !isCall) continue;
-    let r;
-    try {
-      r = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    const p = r.payload || {};
-    if (r.type === "response_item" && p.type === "message" && (p.role === "user" || p.role === "developer")) {
-      const t = textOf(p);
-      if (t.startsWith("# AGENTS.md instructions for ")) {
-        for (const m of t.matchAll(/^# AGENTS\.md instructions for (.+)$/gm)) addDir(m[1].trim());
-        addText(t);
-      }
-      if (p.role === "developer" && t.startsWith("<skills_instructions>")) {
-        skills.clear();
-        for (const s of parseSkills(t)) skills.set(`${s.name}\0${s.path}`, s);
-      }
-    } else if (r.type === "world_state") {
-      addDir(p.state?.agents_md?.directory);
-      addText(p.state?.agents_md?.text);
-    } else if (r.type === "turn_context") {
-      for (const id of p.disabled_plugin_ids || []) disabledPlugins.add(id);
-    } else if (r.type === "response_item" && /function_call|tool_call/.test(p.type || "") && typeof p.name === "string") {
-      const m = /^mcp__(.+?)__/.exec(p.name);
-      if (m) mcp.add(m[1]);
-    } else if (r.type === "event_msg" && /^mcp_tool_call/.test(p.type || "")) {
-      const s = p.invocation?.server;
-      if (s) mcp.add(s);
-    }
-  }
-  resolveAgentsFiles(bootstrap, agentsTexts, codexHome);
-  return {
-    source: rollout,
-    sessionId: meta?.id || path7.basename(rollout, ".jsonl").replace(/^rollout-.*?T[\d-]+-/, ""),
-    cwd: meta?.cwd || null,
-    observed: {
-      bootstrap: [...bootstrap.values()].sort((a, b) => a.path.localeCompare(b.path)),
-      skills: [...skills.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)),
-      mcpServers: [...mcp].sort(),
-      // Servers Codex logged as configured-but-not-ready ("omitting MCP server without an exact ready client").
-      // Positive evidence of a ready server is not logged, so this is not part of mcpServers.
-      mcpOmitted: omittedMcp(codexHome, meta?.id),
-      disabledPlugins: [...disabledPlugins].sort(),
-      hooks: []
-    }
-  };
-}
-var require2, realOr, textOf;
-var init_codex2 = __esm({
-  "src/live/codex.js"() {
-    require2 = createRequire(import.meta.url);
-    realOr = (p) => {
-      try {
-        return fs5.realpathSync(p);
-      } catch {
-        return p;
-      }
-    };
-    textOf = (payload) => (payload.content || []).map((c) => c?.text || "").join("\n");
-  }
-});
-
 // src/index.js
 var src_exports = {};
 __export(src_exports, {
   ADAPTERS: () => ADAPTERS,
   audit: () => audit
 });
-import os from "node:os";
+import os2 from "node:os";
 function audit(opts = {}) {
   const env = opts.env || process.env;
-  const home = canonical(opts.home || os.homedir());
+  const home = canonical(opts.home || os2.homedir());
   const session = opts.session || (opts.cwd ? { harness: null, detectedBy: [] } : detectSession(env));
   const cwd = canonical(opts.cwd || session.bootCwd || process.cwd());
   const names = opts.harnesses?.length ? opts.harnesses : Object.keys(ADAPTERS);
@@ -11323,10 +11341,10 @@ var init_src = __esm({
     init_fsutil();
     init_session();
     init_claude();
-    init_codex();
+    init_codex2();
     init_opencode();
     init_claude2();
-    init_codex2();
+    init_codex();
     ADAPTERS = { claude: auditClaude, codex: auditCodex, opencode: auditOpencode };
     LIVE = { claude: liveClaude, codex: liveCodex };
   }
@@ -11453,7 +11471,9 @@ function compareLive(h) {
         unverifiable: new Set(items.filter((i) => skillKinds.includes(i.kind) && i.status === "unknown").map(canon))
       });
     })(),
-    mcp: category({
+    // Codex rollouts never record MCP servers, so without another oracle (e.g. `codex mcp list`)
+    // there is nothing to compare against; report not-observable instead of false extras.
+    mcp: harness === "codex" && !(o.mcpServers || []).length ? null : category({
       preds: dedupe(mcpItems, mcpName),
       lives: (o.mcpServers || []).map(nameOf),
       canon: mcpName,
@@ -11686,6 +11706,7 @@ function live(){
  const names={bootstrap:'Bootstrap docs',skills:'Skills',mcp:'MCP servers'};
  for(const k of ['bootstrap','skills','mcp']){
   const r=c[k];const card=$('div',{class:'card'},$('h3',{},names[k]));
+  if(!r){card.append($('div',{class:'muted'},"Not observable: this harness's session log does not record it."));cards.append(card);continue}
   const m=$('div',{class:'m'});
   const row=(l,v,bar)=>{m.append($('span',{},l),$('span',{},v))};
   row('predicted / observed / matched',r.predicted+' / '+r.observed+' / '+r.matched);
@@ -11896,7 +11917,7 @@ var init_app = __esm({
 
 // src/discover.js
 import fs7 from "node:fs";
-import os2 from "node:os";
+import os3 from "node:os";
 import path8 from "node:path";
 import { execFileSync as execFileSync2 } from "node:child_process";
 function listRunning() {
@@ -11925,7 +11946,7 @@ function listRunning() {
   }
   return rows.sort((a, b) => String(a.cwd).localeCompare(String(b.cwd)));
 }
-function listRecent({ home = os2.homedir(), hours = 72, limit = 40 } = {}) {
+function listRecent({ home = os3.homedir(), hours = 72, limit = 40 } = {}) {
   const since = Date.now() - hours * 36e5;
   const rows = [];
   const claudeBase = path8.join(home, ".claude/projects");
@@ -12018,7 +12039,7 @@ __export(server_exports, {
 });
 import http from "node:http";
 import fs8 from "node:fs";
-import os3 from "node:os";
+import os4 from "node:os";
 function reportFor(q) {
   const harnesses = q.get("harness") ? q.get("harness").split(",").filter(Boolean) : void 0;
   const pid = q.get("pid") ? Number(q.get("pid")) : null;
@@ -12046,7 +12067,7 @@ function startServer({ port = 4747, host = "127.0.0.1" } = {}) {
     try {
       switch (url.pathname) {
         case "/":
-          return send(200, "text/html; charset=utf-8", renderApp({ home: os3.homedir(), cwd: process.cwd() }));
+          return send(200, "text/html; charset=utf-8", renderApp({ home: os4.homedir(), cwd: process.cwd() }));
         case "/report":
           return send(200, "text/html; charset=utf-8", renderHtml(reportFor(q)));
         case "/api/audit": {
@@ -12059,7 +12080,7 @@ function startServer({ port = 4747, host = "127.0.0.1" } = {}) {
         case "/api/recent":
           return json(listRecent({ hours: Number(q.get("hours") || 72) }));
         case "/api/ls":
-          return json(listFolder(q.get("dir") || os3.homedir()));
+          return json(listFolder(q.get("dir") || os4.homedir()));
         default:
           return send(404, "text/plain", "not found");
       }
@@ -12090,10 +12111,10 @@ __export(tree_exports, {
   renderTree: () => renderTree,
   tildify: () => tildify
 });
-import os4 from "node:os";
+import os5 from "node:os";
 function renderTree(report, opts = {}) {
   const color = opts.color ?? (process.stdout.isTTY && !process.env.NO_COLOR);
-  const home = report.home || os4.homedir();
+  const home = report.home || os5.homedir();
   const paint = (code, s) => color ? `\x1B[${code}m${s}\x1B[0m` : s;
   const dim = (s) => paint(2, s);
   const bold = (s) => paint(1, s);
@@ -12141,6 +12162,10 @@ function renderTree(report, opts = {}) {
       out.push("", bold("Live vs predicted") + dim(cmp.source ? `  (${t(String(cmp.source))})` : ""));
       for (const k of ["bootstrap", "skills", "mcp"]) {
         const c = cmp[k];
+        if (!c) {
+          out.push(dim(`  ${k.padEnd(10)} not observable from this harness's session log`));
+          continue;
+        }
         out.push(`  ${k.padEnd(10)} pred ${c.predicted}  obs ${c.observed}  match ${c.matched}  recall ${pct(c.recall)} (file-backed ${pct(c.recallFileBacked)})  precision ${pct(c.precision)} (adjusted ${pct(c.precisionAdjusted)})`);
         const list = (label, arr, code) => {
           if (!arr?.length) return;
@@ -12166,7 +12191,7 @@ var init_tree = __esm({
     KIND_ORDER = ["bootstrap", "skill", "hook", "mcp", "plugin", "command", "agent", "rule"];
     KIND_LABEL = { bootstrap: "Bootstrap docs", skill: "Skills", hook: "Hooks", mcp: "MCP servers", plugin: "Plugins", command: "Commands", agent: "Agents", rule: "Rules" };
     STATUS_COLOR = { active: 32, conditional: 36, disabled: 90, shadowed: 33, "needs-approval": 35, unknown: 90 };
-    tildify = (p, home = os4.homedir()) => p && home && (p === home || p.startsWith(home + "/")) ? "~" + p.slice(home.length) : p;
+    tildify = (p, home = os5.homedir()) => p && home && (p === home || p.startsWith(home + "/")) ? "~" + p.slice(home.length) : p;
     fmtBytes = (n) => n == null ? "" : n < 1024 ? `${n} B` : `${(n / 1024).toFixed(1)} KB`;
     chainPath = (c) => typeof c === "string" ? c : c?.path ?? "";
   }

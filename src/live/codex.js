@@ -113,6 +113,15 @@ function omittedMcp(codexHome, threadId) {
   } catch { return []; } finally { try { db?.close(); } catch { /* ignore */ } }
 }
 
+// The cwd a Codex thread was started with, from its rollout. Needed because app-server
+// hosts many threads and its own process cwd says nothing about any of them.
+export function codexThreadCwd({ home, env = {}, threadId }) {
+  if (!threadId) return null;
+  const codexHome = env.CODEX_HOME || path.join(home, '.codex');
+  const f = findRollout(path.join(codexHome, 'sessions'), null, threadId);
+  return f ? readMeta(f)?.cwd || null : null;
+}
+
 export function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
   const codexHome = env.CODEX_HOME || path.join(home, '.codex');
   const sessionsDir = path.join(codexHome, 'sessions');

@@ -64,6 +64,7 @@ export function renderTree(report, opts = {}) {
       out.push('', bold('Live vs predicted') + dim(cmp.source ? `  (${t(String(cmp.source))})` : ''));
       for (const k of ['bootstrap', 'skills', 'mcp']) {
         const c = cmp[k];
+        if (!c) { out.push(dim(`  ${k.padEnd(10)} not observable from this harness's session log`)); continue; }
         out.push(`  ${k.padEnd(10)} pred ${c.predicted}  obs ${c.observed}  match ${c.matched}  recall ${pct(c.recall)} (file-backed ${pct(c.recallFileBacked)})  precision ${pct(c.precision)} (adjusted ${pct(c.precisionAdjusted)})`);
         const list = (label, arr, code) => {
           if (!arr?.length) return;
