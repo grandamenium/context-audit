@@ -23,7 +23,7 @@ node /tmp/context-audit/dist/context-audit.mjs
 
 No install step is needed, only Node.js 20+. When an agent runs it, the tool detects that agent's own session (harness, process, boot folder, launch flags), compares against the session's own log, writes an interactive HTML report, opens it in the user's browser, and prints a fixed-format summary.
 
-**Always answer in this shape:** reply with everything between `===== BEGIN CONTEXT AUDIT =====` and `===== END CONTEXT AUDIT =====` exactly as printed, then answer the user's specific question in a sentence or two. If the report did not open in the browser, give the user its path. Skills-aware agents can install [`skills/context-audit/SKILL.md`](skills/context-audit/SKILL.md) to do this without instructions.
+**Always answer in this shape:** send everything between `===== BEGIN CONTEXT AUDIT =====` and `===== END CONTEXT AUDIT =====` exactly as printed (also in chat channels such as Telegram or Slack), give the user the HTML report in one click (attach the file if your interface can send files, otherwise the clickable `file://` link the tool prints, never a bare path), then answer their specific question in a sentence or two. Skills-aware agents can install [`skills/context-audit/SKILL.md`](skills/context-audit/SKILL.md) to do this without instructions.
 
 ## Install
 

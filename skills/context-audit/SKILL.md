@@ -22,9 +22,9 @@ node /tmp/context-audit/dist/context-audit.mjs
 
 The output starts with `AGENT INSTRUCTIONS`. Follow them:
 
-1. Reply with everything between `===== BEGIN CONTEXT AUDIT =====` and `===== END CONTEXT AUDIT =====`, exactly as written. It is Markdown. Do not shorten or paraphrase it.
-2. The tool writes an interactive HTML report and opens it in the user's browser. If it could not open (sandbox, remote machine), give the user the report path from the summary.
-3. Then answer the user's specific question, if any, in one or two sentences, citing the file paths from the report.
+1. Send the user everything between `===== BEGIN CONTEXT AUDIT =====` and `===== END CONTEXT AUDIT =====` exactly as printed (it is Markdown). This is the required format, also in chat channels such as Telegram or Slack. Do not paraphrase it.
+2. Give the user the interactive HTML report in one click: attach the HTML file if your interface can send files, otherwise send the clickable `file://` link printed by the tool. Never give only a bare path.
+3. Then answer the user's specific question, if any, in one or two sentences, citing file paths from the report.
 
 ## Follow-ups
 

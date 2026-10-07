@@ -43,19 +43,20 @@ export function audit(opts = {}) {
     // launch flags only apply to the harness that was actually launched with them
     const launch = opts.launch || (session.harness === name ? session.launch : undefined);
     const ctx = { cwd, home, env, platform: process.platform, launch };
+    const sid = opts.sessionId || (session.harness === name ? session.sessionId : null);
+    // Read the live log first: for Codex it records the session's context window, which
+    // decides how many skills fit in the listing.
+    let live;
+    if (opts.live && LIVE[name]) {
+      try { live = LIVE[name]({ cwd, home, env, sessionId: sid }); } catch (e) { live = { error: String(e.message || e) }; }
+      if (live?.contextWindow) ctx.contextWindow = live.contextWindow;
+    }
     try {
       report.harnesses[name] = ADAPTERS[name](ctx);
     } catch (e) {
       report.harnesses[name] = { items: [], chain: [], warnings: [`adapter crashed: ${e.stack || e}`] };
     }
-    if (opts.live && LIVE[name]) {
-      const sid = opts.sessionId || (session.harness === name ? session.sessionId : null);
-      try {
-        report.harnesses[name].live = LIVE[name]({ cwd, home, env, sessionId: sid });
-      } catch (e) {
-        report.harnesses[name].live = { error: String(e.message || e) };
-      }
-    }
+    if (live) report.harnesses[name].live = live;
   }
   report.hygiene = skillHygiene(report);
   return report;

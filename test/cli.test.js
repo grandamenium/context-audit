@@ -19,10 +19,10 @@ test('cli --summary prints agent instructions and a fixed-format block, and writ
   const dir = fileURLToPath(new URL('..', import.meta.url));
   const r = spawnSync(process.execPath, [bin, dir, '--summary', '--no-open', '--harness', 'codex'], { encoding: 'utf8' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^AGENT INSTRUCTIONS: /);
+  assert.match(r.stdout, /^AGENT INSTRUCTIONS \(required response format/);
   assert.match(r.stdout, /===== BEGIN CONTEXT AUDIT =====\n## Context audit: Codex/);
   assert.match(r.stdout, /\| Kind \| Active \| Not active \|/);
   assert.match(r.stdout, /===== END CONTEXT AUDIT =====\n$/);
-  const html = r.stdout.match(/\*\*Interactive report:\*\* (\S+\.html)/)[1];
+  const html = r.stdout.match(/attach this file: (\S+\.html)/)[1];
   assert.ok(fs.existsSync(html));
 });

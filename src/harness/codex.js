@@ -359,6 +359,7 @@ export function auditCodex(ctx) {
     const model = base.model;
     const cat = readJson(path.join(codexHome, 'models_cache.json'));
     const m = (cat?.models || []).find((x) => x.slug === model);
+    if (ctx.contextWindow) return { low: ctx.contextWindow, high: ctx.contextWindow, source: 'live session log' };
     const pinned = Number(base.model_context_window);
     if (Number.isFinite(pinned) && pinned > 0) return { low: pinned, high: pinned, source: 'model_context_window config' };
     if (!m?.context_window) return null;

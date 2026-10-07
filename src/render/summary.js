@@ -34,7 +34,7 @@ export function renderSummary(report, { harness, htmlPath, opened, maxList = 8 }
   out.push(s.harness === harness && (s.pid || s.sessionId)
     ? `**Session:** ${NAME[harness]} ${s.pid ? `pid ${s.pid}` : `session ${s.sessionId}`}, booted in \`${tild(report.cwd)}\`${flags.length ? `, launch flags: ${flags.join('; ')}` : ''}`
     : `**Folder:** \`${tild(report.cwd)}\` (what a new ${NAME[harness]} session started here would load)`);
-  if (htmlPath) out.push(`**Interactive report:** ${htmlPath}${opened ? ' (opened in your browser)' : ''}`);
+  if (htmlPath) out.push(`**Interactive report:** [open the context tree](${new URL('file://' + htmlPath).href})${opened ? ' (also opened in the browser on this machine)' : ''}  \n\`${htmlPath}\``);
   out.push('');
 
   out.push('| Kind | Active | Not active |');

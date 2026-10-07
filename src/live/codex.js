@@ -135,6 +135,7 @@ export function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
   const skills = new Map();
   const mcp = new Set();
   const disabledPlugins = new Set();
+  let effectiveWindow = null;
   // The injected text is the chain's AGENTS files concatenated under one header naming only the cwd, so the
   // contributing files are recovered by checking which candidate files' contents appear in that text.
   const agentsTexts = [];
@@ -148,7 +149,8 @@ export function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
     const isMsg = line.includes('"type":"message"');
     const isWorld = line.includes('"type":"world_state"') || line.includes('"type":"turn_context"');
     const isCall = line.includes('mcp__') || line.includes('mcp_tool_call');
-    if (!isMsg && !isWorld && !isCall) continue;
+    const isTokens = !effectiveWindow && line.includes('"model_context_window"');
+    if (!isMsg && !isWorld && !isCall && !isTokens) continue;
     let r;
     try { r = JSON.parse(line); } catch { continue; }
     const p = r.payload || {};
@@ -173,6 +175,8 @@ export function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
     } else if (r.type === 'response_item' && /function_call|tool_call/.test(p.type || '') && typeof p.name === 'string') {
       const m = /^mcp__(.+?)__/.exec(p.name);
       if (m) mcp.add(m[1]);
+    } else if (r.type === 'event_msg' && p.type === 'token_count' && p.info?.model_context_window) {
+      effectiveWindow = Number(p.info.model_context_window);
     } else if (r.type === 'event_msg' && /^mcp_tool_call/.test(p.type || '')) {
       const s = p.invocation?.server;
       if (s) mcp.add(s);
@@ -185,6 +189,9 @@ export function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
     source: rollout,
     sessionId: meta?.id || path.basename(rollout, '.jsonl').replace(/^rollout-.*?T[\d-]+-/, ''),
     cwd: meta?.cwd || null,
+    // token_count reports the effective window (95% of the raw model window); the skill-list
+    // budget is computed from the raw one, so convert back.
+    contextWindow: effectiveWindow ? Math.round(effectiveWindow / 0.95) : null,
     observed: {
       bootstrap: [...bootstrap.values()].sort((a, b) => a.path.localeCompare(b.path)),
       skills: [...skills.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)),

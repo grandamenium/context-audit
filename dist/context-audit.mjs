@@ -9387,6 +9387,7 @@ function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
   const skills = /* @__PURE__ */ new Map();
   const mcp = /* @__PURE__ */ new Set();
   const disabledPlugins = /* @__PURE__ */ new Set();
+  let effectiveWindow = null;
   const agentsTexts = [];
   const addText = (t) => {
     if (typeof t === "string" && t) agentsTexts.push(t);
@@ -9399,7 +9400,8 @@ function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
     const isMsg = line.includes('"type":"message"');
     const isWorld = line.includes('"type":"world_state"') || line.includes('"type":"turn_context"');
     const isCall = line.includes("mcp__") || line.includes("mcp_tool_call");
-    if (!isMsg && !isWorld && !isCall) continue;
+    const isTokens = !effectiveWindow && line.includes('"model_context_window"');
+    if (!isMsg && !isWorld && !isCall && !isTokens) continue;
     let r;
     try {
       r = JSON.parse(line);
@@ -9425,6 +9427,8 @@ function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
     } else if (r.type === "response_item" && /function_call|tool_call/.test(p.type || "") && typeof p.name === "string") {
       const m = /^mcp__(.+?)__/.exec(p.name);
       if (m) mcp.add(m[1]);
+    } else if (r.type === "event_msg" && p.type === "token_count" && p.info?.model_context_window) {
+      effectiveWindow = Number(p.info.model_context_window);
     } else if (r.type === "event_msg" && /^mcp_tool_call/.test(p.type || "")) {
       const s = p.invocation?.server;
       if (s) mcp.add(s);
@@ -9435,6 +9439,9 @@ function liveCodex({ cwd, home, env = {}, sessionId } = {}) {
     source: rollout,
     sessionId: meta?.id || path2.basename(rollout, ".jsonl").replace(/^rollout-.*?T[\d-]+-/, ""),
     cwd: meta?.cwd || null,
+    // token_count reports the effective window (95% of the raw model window); the skill-list
+    // budget is computed from the raw one, so convert back.
+    contextWindow: effectiveWindow ? Math.round(effectiveWindow / 0.95) : null,
     observed: {
       bootstrap: [...bootstrap.values()].sort((a, b) => a.path.localeCompare(b.path)),
       skills: [...skills.values()].sort((a, b) => a.name.localeCompare(b.name) || a.path.localeCompare(b.path)),
@@ -10665,6 +10672,7 @@ function auditCodex(ctx) {
     const model = base.model;
     const cat = readJson(path5.join(codexHome, "models_cache.json"));
     const m = (cat?.models || []).find((x) => x.slug === model);
+    if (ctx.contextWindow) return { low: ctx.contextWindow, high: ctx.contextWindow, source: "live session log" };
     const pinned = Number(base.model_context_window);
     if (Number.isFinite(pinned) && pinned > 0) return { low: pinned, high: pinned, source: "model_context_window config" };
     if (!m?.context_window) return null;
@@ -11328,19 +11336,22 @@ function audit(opts = {}) {
   for (const name of names) {
     const launch = opts.launch || (session.harness === name ? session.launch : void 0);
     const ctx = { cwd, home, env, platform: process.platform, launch };
+    const sid = opts.sessionId || (session.harness === name ? session.sessionId : null);
+    let live;
+    if (opts.live && LIVE[name]) {
+      try {
+        live = LIVE[name]({ cwd, home, env, sessionId: sid });
+      } catch (e) {
+        live = { error: String(e.message || e) };
+      }
+      if (live?.contextWindow) ctx.contextWindow = live.contextWindow;
+    }
     try {
       report.harnesses[name] = ADAPTERS[name](ctx);
     } catch (e) {
       report.harnesses[name] = { items: [], chain: [], warnings: [`adapter crashed: ${e.stack || e}`] };
     }
-    if (opts.live && LIVE[name]) {
-      const sid = opts.sessionId || (session.harness === name ? session.sessionId : null);
-      try {
-        report.harnesses[name].live = LIVE[name]({ cwd, home, env, sessionId: sid });
-      } catch (e) {
-        report.harnesses[name].live = { error: String(e.message || e) };
-      }
-    }
+    if (live) report.harnesses[name].live = live;
   }
   report.hygiene = skillHygiene(report);
   return report;
@@ -12162,7 +12173,8 @@ function renderSummary(report, { harness, htmlPath, opened, maxList = 8 } = {}) 
   out.push(`## Context audit: ${NAME[harness] || harness}`);
   out.push("");
   out.push(s.harness === harness && (s.pid || s.sessionId) ? `**Session:** ${NAME[harness]} ${s.pid ? `pid ${s.pid}` : `session ${s.sessionId}`}, booted in \`${tild(report.cwd)}\`${flags.length ? `, launch flags: ${flags.join("; ")}` : ""}` : `**Folder:** \`${tild(report.cwd)}\` (what a new ${NAME[harness]} session started here would load)`);
-  if (htmlPath) out.push(`**Interactive report:** ${htmlPath}${opened ? " (opened in your browser)" : ""}`);
+  if (htmlPath) out.push(`**Interactive report:** [open the context tree](${new URL("file://" + htmlPath).href})${opened ? " (also opened in the browser on this machine)" : ""}  
+\`${htmlPath}\``);
   out.push("");
   out.push("| Kind | Active | Not active |");
   out.push("|---|---|---|");
@@ -12476,7 +12488,10 @@ ${USAGE}`);
     const which = report.session?.harness && report.harnesses[report.session.harness] ? [report.session.harness] : Object.keys(report.harnesses);
     const body = which.map((h) => renderSummary2(report, { harness: h, htmlPath: file, opened })).join("\n---\n\n");
     process.stdout.write([
-      "AGENT INSTRUCTIONS: Reply to the user with everything between the BEGIN and END lines, exactly as written (it is Markdown). Do not shorten or paraphrase it. Then answer any specific question they asked in one or two sentences. The interactive report is a local HTML file: if it did not open in their browser, give them the path so they can open it.",
+      "AGENT INSTRUCTIONS (required response format, also in chat channels such as Telegram or Slack):",
+      "1. Send the user everything between the BEGIN and END lines exactly as written. It is Markdown. Do not shorten, paraphrase or reformat it.",
+      `2. Give the user the interactive HTML report in one click: if your interface can attach or send files, attach this file: ${file}. Otherwise send it as a clickable link: ${new URL("file://" + file).href}. Never give only a bare path.`,
+      "3. Then answer any specific question the user asked, in one or two sentences.",
       "===== BEGIN CONTEXT AUDIT =====",
       body.trimEnd(),
       "===== END CONTEXT AUDIT =====",

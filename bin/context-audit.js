@@ -102,7 +102,10 @@ if (agentMode) {
   const which = report.session?.harness && report.harnesses[report.session.harness] ? [report.session.harness] : Object.keys(report.harnesses);
   const body = which.map((h) => renderSummary(report, { harness: h, htmlPath: file, opened })).join('\n---\n\n');
   process.stdout.write([
-    'AGENT INSTRUCTIONS: Reply to the user with everything between the BEGIN and END lines, exactly as written (it is Markdown). Do not shorten or paraphrase it. Then answer any specific question they asked in one or two sentences. The interactive report is a local HTML file: if it did not open in their browser, give them the path so they can open it.',
+    'AGENT INSTRUCTIONS (required response format, also in chat channels such as Telegram or Slack):',
+    '1. Send the user everything between the BEGIN and END lines exactly as written. It is Markdown. Do not shorten, paraphrase or reformat it.',
+    `2. Give the user the interactive HTML report in one click: if your interface can attach or send files, attach this file: ${file}. Otherwise send it as a clickable link: ${new URL('file://' + file).href}. Never give only a bare path.`,
+    '3. Then answer any specific question the user asked, in one or two sentences.',
     '===== BEGIN CONTEXT AUDIT =====',
     body.trimEnd(),
     '===== END CONTEXT AUDIT =====',
