@@ -1,0 +1,6 @@
+node_modules/
+context-audit.html
+verify/out/
+.DS_Store
+*.tgz
+verify/local/

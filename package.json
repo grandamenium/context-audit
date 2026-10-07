@@ -1,0 +1,48 @@
+{
+  "name": "context-audit",
+  "version": "0.1.0",
+  "description": "Audit the skills, hooks, MCP servers and bootstrap docs that load into an agent session (Claude Code, Codex, OpenCode) for a working directory.",
+  "type": "module",
+  "bin": {
+    "context-audit": "bin/context-audit.js"
+  },
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "verify": "node verify/run.js",
+    "build": "esbuild bin/context-audit.js --bundle --platform=node --format=esm --target=node20 --main-fields=module,main --outfile=dist/context-audit.mjs --banner:js=\"import { createRequire as __cr } from 'node:module'; const require = __cr(import.meta.url);\" && node scripts/notices.mjs",
+    "prepack": "npm test"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "jsonc-parser": "3.3.1",
+    "smol-toml": "1.9.0",
+    "yaml": "2.9.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "claude-code",
+    "codex",
+    "opencode",
+    "agents",
+    "mcp",
+    "skills",
+    "hooks",
+    "audit"
+  ],
+  "license": "MIT",
+  "author": "Cortext LLC"
+}
