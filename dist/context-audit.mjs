@@ -11658,6 +11658,23 @@ aside{position:sticky;top:8px}
 .launch{border-left:3px solid var(--acc)}
 
 
+
+.bar2{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.bar2 input[type=search]{flex:1;min-width:200px;width:auto}
+.ac{color:var(--mut)}.ac b{color:var(--fg)}.strip{gap:12px}
+.row.it{display:flex;gap:8px;align-items:baseline;padding:2px 4px;cursor:pointer;border-radius:3px}.row.it:hover,.row.it.sel,.cl:hover,.cl.sel,tr.cl2:hover{background:var(--hi)}
+.nm{font-weight:500}
+.rel{color:var(--mut);font-size:12px;direction:rtl;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1}
+.x{border:1px solid var(--bd);border-radius:10px;padding:0 6px;font-size:11px;color:var(--mut);white-space:nowrap}
+.st{font-size:11px;border:1px solid currentColor;border-radius:3px;padding:0 4px;font-weight:500}
+details.copies>summary{display:flex;gap:8px;align-items:baseline;cursor:pointer;list-style:none;padding:2px 4px}
+details.copies>summary::-webkit-details-marker{display:none}
+details.copies>summary::before{content:"\\25B8";color:var(--mut);width:10px;flex:none;margin-left:-14px}
+details.copies[open]>summary::before{content:"\\25BE"}
+details.copies{margin-left:14px}
+.cl{display:flex;gap:8px;align-items:baseline;padding:1px 4px 1px 18px;cursor:pointer;border-left:1px solid var(--bd);margin-left:4px}
+details.fold.dir>summary .lab,details.fold.nftroot>summary .lab,details.fold.kindsec>summary .lab{font-weight:600}
+details.fold.sub>summary .lab{font-weight:500}
+tr.cl2 td{color:var(--mut)}.kindsec table{table-layout:fixed}.kindsec th:nth-child(1){width:32%}.kindsec th:nth-child(2){width:8%}.kindsec th:nth-child(4){width:14%}td.p .rel{display:block}.cl .rel{flex:0 1 auto}.cmd{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:40%}td.p{max-width:520px;overflow:hidden}
 #tip{position:fixed;z-index:50;max-width:340px;background:#1c1917;color:#fafaf9;border:1px solid #57534e;border-radius:4px;padding:6px 9px;font-size:12px;line-height:1.4;white-space:pre-line;pointer-events:none;display:none;box-shadow:0 4px 14px rgba(0,0,0,.3);word-break:break-word}
 @media(prefers-color-scheme:dark){#tip{background:#f5f5f4;color:#1c1917;border-color:#a8a29e}}
 .chip.note{color:var(--mut);cursor:help;font-size:11px}
@@ -11716,7 +11733,7 @@ const G={
   'remote-unverifiable':'A remote connector that cannot be verified from local files.',
   unexplained:'A mismatch with no known reason. These are the ones worth investigating.',
   predicted:'Items this tool says apply to the session.',observed:'Items found in the live session log.',matched:'Predicted items that the live log confirms.'},
- ui:{search:'Filter items by name, path, plugin, reason or details.',
+ ui:{nft:'Sources that are not a folder on disk: plugins, launch flags, harness built-ins and account connectors.',plugins:'Installed plugins. Each lists the skills, hooks and servers it contributes.',search:'Filter items by name, path, plugin, reason or details.',
   showhidden:'Disabled and shadowed items are hidden by default. Tick to include them.',
   folder:'Items grouped by the folder they come from, from / down to the working directory.',
   bykind:'A flat sortable table of every item with filters.',
@@ -11733,7 +11750,7 @@ const mid=(p,n=58)=>{p=String(p||'');if(p.length<=n)return p;const k=Math.floor(
 const names=Object.keys(D.harnesses);
 const QS=new URLSearchParams(location.search);
 const hashTab=decodeURIComponent((location.hash||'').slice(1)||QS.get('tab')||'');
-const S={h:names.includes(hashTab)?hashTab:names[0],view:'folder',q:'',scope:new Set(),status:new Set(),kind:new Set(),sel:null,sort:'kind',showHidden:false,open:new Set(),closed:new Set(),liveOpen:QS.get('open')==='live'};
+const S={h:names.includes(hashTab)?hashTab:names[0],view:'folder',q:'',scope:new Set(),status:new Set(),kind:new Set(),sel:null,sort:'kind',showInactive:false,all:null,exp:new Set(),open:new Set(),closed:new Set(),liveOpen:QS.get('open')==='live'};
 // floating tooltip: shows on hover and keyboard focus, works for every [data-tip]
 const tipEl=document.createElement('div');tipEl.id='tip';tipEl.setAttribute('role','tooltip');document.body.append(tipEl);
 const showTip=(el)=>{const t=el.getAttribute('data-tip');if(!t)return;tipEl.textContent=t;tipEl.style.display='block';const r=el.getBoundingClientRect(),w=tipEl.offsetWidth,h=tipEl.offsetHeight;
@@ -11746,20 +11763,20 @@ const cp=(txt,b)=>{const done=()=>{const o=b.textContent;b.textContent='copied';
  if(navigator.clipboard)navigator.clipboard.writeText(txt).then(done,()=>fb(txt,done));else fb(txt,done)};
 const fb=(t,d)=>{const a=document.createElement('textarea');a.value=t;document.body.append(a);a.select();try{document.execCommand('copy')}catch(e){}a.remove();d()};
 const H=()=>D.harnesses[S.h];
-function visible(it,ignoreFilters){
- if(!S.showHidden&&(it.status==='disabled'||it.status==='shadowed')&&!S.status.has(it.status))return false;
- if(ignoreFilters)return true;
- if(S.scope.size&&!S.scope.has(it.scope))return false;
- if(S.status.size&&!S.status.has(it.status))return false;
- if(S.kind.size&&!S.kind.has(it.kind))return false;
- if(S.q){const q=S.q.toLowerCase();if(!(it.name+' '+it.path+' '+(it.plugin||'')+' '+(it.reason||'')+' '+JSON.stringify(it.details||{})).toLowerCase().includes(q))return false}
+const KL={bootstrap:'Bootstrap docs',skill:'Skills',hook:'Hooks',mcp:'MCP servers',plugin:'Plugins',command:'Commands',agent:'Agents',rule:'Rules'};
+const gl=(group,key)=>(G[group]&&G[group][key])||'';
+const stEl=(s,n)=>tip($('span',{class:'st',style:'color:var(--'+s+')'},n>1?n+' '+s:s),gl('status',s));
+const tagEl=(g,v)=>tip($('span',{class:'tag'},v),gl(g,v));
+const loc=it=>(it.details&&it.details.listedPath)||it.path;
+const itemTip=it=>it.name+'  ['+it.kind+', '+it.scope+', '+it.status+']\\n'+(it.reason?it.reason+'\\n':'')+(it.details&&it.details.command?'command: '+it.details.command+'\\n':'')+loc(it)+(loc(it)!==it.path?'\\n(resolves to '+it.path+')':'');
+const tailP=(p,n=84)=>{p=String(p||'');return p.length<=n?p:'\\u2026'+p.slice(p.length-n+1)};
+const relEl=(text,full)=>{const e=$('span',{class:'rel mono'},$('bdi',{},text));if(full)e.setAttribute('data-tip',full);return e};
+function visible(it){
+ if(S.status.size){if(!S.status.has(it.status))return false}
+ else if(!S.showInactive&&(it.status==='disabled'||it.status==='shadowed'))return false;
+ if(S.q){const q=S.q.toLowerCase();if(!(it.name+' '+it.path+' '+loc(it)+' '+(it.plugin||'')+' '+(it.reason||'')+' '+JSON.stringify(it.details||{})).toLowerCase().includes(q))return false}
  return true}
 const cnt=(k)=>{const m={};for(const i of H().items||[])m[i[k]]=(m[i[k]]||0)+1;return m};
-const gl=(group,key)=>(G[group]&&G[group][key])||'';
-function chips(set,vals,counts,group){return $('div',{class:'chips'},vals.filter(v=>counts[v]).map(v=>tip($('button',{class:'chip'+(set.has(v)?' on':''),onclick:()=>{set.has(v)?set.delete(v):set.add(v);render()}},v+' '+counts[v]),gl(group,v)+'\\nClick to filter.')))}
-const stEl=s=>tip($('span',{class:'st',style:'color:var(--'+s+')'},s),gl('status',s));
-const tagEl=(g,v)=>tip($('span',{class:'tag'},v),gl(g,v));
-const itemTip=it=>it.name+'  ['+it.kind+', '+it.scope+', '+it.status+']\\n'+(it.reason?it.reason+'\\n':'')+it.path;
 function pathBtns(p){return $('span',{},tip($('button',{class:'copy',onclick:e=>{e.stopPropagation();cp(p,e.target)}},'copy path'),G.ui.copypath),' ',tip($('button',{class:'copy',onclick:e=>{e.stopPropagation();cp("open '"+p.replace(/'/g,"'\\\\''")+"'",e.target)}},'copy open cmd'),G.ui.copyopen))}
 function select(it){S.sel=it.id;render()}
 function detail(){
@@ -11769,94 +11786,120 @@ function detail(){
  box.append($('div',{style:'font-weight:600;font-size:14px'},it.name),$('div',{},tagEl('kind',it.kind),' ',tagEl('scope',it.scope),' ',stEl(it.status)));
  const dl=$('dl',{style:'margin-top:8px'});
  const row=(k,v,t)=>{if(v){dl.append(tip($('dt',{},k),t),$('dd',{class:'mono'},v))}};
- row('path',it.path,'Full path of the file that defines this item.');row('defined in',it.definedIn,'The config file that references this item, when different from its own file.');
+ row('path',it.path,'Full path of the file that defines this item.');
+ if(loc(it)!==it.path)row('scanned at',loc(it),'Where the harness found it: a symlink that points at the path above.');
+ row('defined in',it.definedIn,'The config file that references this item, when different from its own file.');
  row('plugin',it.plugin,'The plugin that contributes this item.');row('reason',it.reason,'Why the item has this status.');row('id',it.id,'Stable identifier of this item.');
  box.append(dl,$('div',{style:'margin-top:6px'},pathBtns(it.path)));
  if(it.details&&Object.keys(it.details).length)box.append(tip($('div',{class:'mut',style:'margin-top:8px'},'details (redacted)'),'Kind-specific details. Secrets such as tokens and env values are replaced with <redacted>.'),$('pre',{class:'mono'},JSON.stringify(it.details,null,2)));
  return box}
 function toolbar(){
- const b=$('div',{class:'panel'});
- const inp=tip($('input',{type:'search',placeholder:'Search name, path, plugin, details...',value:S.q}),G.ui.search);
+ const b=$('div',{class:'panel bar2'});
+ const inp=tip($('input',{type:'search',placeholder:'Search name, path, plugin, details...',value:S.q}),G.ui.search+' Matching groups open automatically.');
  inp.oninput=()=>{S.q=inp.value;const pos=inp.selectionStart;render();const n=document.querySelector('input[type=search]');n.focus();n.setSelectionRange(pos,pos)};
- b.append(inp);
- const items=(H().items||[]).filter(i=>visible(i,true));
- const c=(k)=>{const m={};for(const i of items)m[i[k]]=(m[i[k]]||0)+1;return m};
- b.append(chips(S.kind,KINDS,c('kind'),'kind'),chips(S.scope,SCOPES,c('scope'),'scope'),chips(S.status,STAT,cnt('status'),'status'));
- const hid=(H().items||[]).filter(i=>i.status==='disabled'||i.status==='shadowed').length;
- if(hid){const cb=$('input',Object.assign({type:'checkbox'},S.showHidden?{checked:''}:{}));cb.onchange=()=>{S.showHidden=cb.checked;render()};b.append(tip($('label',{class:'mut'},cb,' show disabled/shadowed ('+hid+' hidden by default)'),G.ui.showhidden))}
- return b}
-function table(){
- const items=(H().items||[]).filter(i=>visible(i));
- const key={kind:i=>KINDS.indexOf(i.kind)+i.name,name:i=>i.name,scope:i=>i.scope+i.name,status:i=>i.status+i.name,path:i=>i.path};
- items.sort((a,b)=>String(key[S.sort](a)).localeCompare(String(key[S.sort](b))));
- const t=$('table',{},$('thead',{},$('tr',{},['kind','name','scope','status','path'].map(c=>tip($('th',{onclick:()=>{S.sort=c;render()}},c+(S.sort===c?' v':'')),G.ui.th[c]+' Click to sort.')))));
- const tb=$('tbody');
- for(const it of items)tb.append(tip($('tr',{class:'item'+(S.sel===it.id?' sel':''),onclick:()=>select(it)},$('td',{},tagEl('kind',it.kind)),$('td',{},it.name),$('td',{},tagEl('scope',it.scope)),$('td',{},stEl(it.status)),$('td',{class:'p mono'},mid(til(it.path)))),itemTip(it)));
- t.append(tb);
- return $('div',{class:'panel'},$('div',{class:'mut'},items.length+' items'),t)}
-// ---- folder tree
-const kindSummary=items=>{const m={};for(const i of items)m[i.kind]=(m[i.kind]||0)+1;return KINDS.filter(k=>m[k]).map(k=>k+' '+m[k]).join(', ')};
-function isOpen(key,def){const k=S.h+'|'+key;return S.open.has(k)?true:S.closed.has(k)?false:def}
-function fold(key,def,label,labelTip,items,extra,bodyFn){
- const d=$('details',{class:'fold'});if(isOpen(key,def))d.setAttribute('open','');
- const sum=tip($('summary',{},$('span',{class:'lab'},label),$('span',{class:'cnt'},items.length+' item'+(items.length===1?'':'s')+(items.length?' ('+kindSummary(items)+')':'')),extra),labelTip);
- d.append(sum);
- const body=$('div',{class:'body'});d.append(body);
- let done=false;const fill=()=>{if(done)return;done=true;bodyFn(body)};
+ const inactive=(H().items||[]).filter(i=>i.status==='disabled'||i.status==='shadowed').length;
+ const cb=$('input',Object.assign({type:'checkbox',id:'showinactive'},S.showInactive?{checked:''}:{}));cb.onchange=()=>{S.showInactive=cb.checked;render()};
+ const lab=tip($('label',{class:'mut nw'},cb,' Show inactive ('+inactive+')'),G.ui.showhidden);
+ const views=$('div',{class:'views',style:'margin:0'},[['folder','Folder tree'],['kind','By kind']].map(([k,l])=>tip($('button',{class:S.view===k?'on':'',onclick:()=>{S.view=k;render()}},l),k==='folder'?G.ui.folder:G.ui.bykind)));
+ const ex=$('div',{class:'views',style:'margin:0'},tip($('button',{onclick:()=>{S.open.clear();S.closed.clear();S.all='open';render()}},'Expand all'),G.ui.expand),tip($('button',{onclick:()=>{S.open.clear();S.closed.clear();S.all='closed';render()}},'Collapse all'),G.ui.collapse));
+ b.append(inp,lab,views,ex);return b}
+// ---- grouping helpers
+const DEDUPE=new Set(['skill','command','agent']);
+const toRows=items=>{const m=new Map();for(const it of items){const k=DEDUPE.has(it.kind)?it.kind+'\\u0000'+it.name:it.id;let r=m.get(k);if(!r){r={kind:it.kind,name:it.name,items:[]};m.set(k,r)}r.items.push(it)}return[...m.values()].sort((a,b)=>a.name.localeCompare(b.name))};
+function isOpen(key,def){if(S.q)return true;const k=S.h+'|'+key;return S.open.has(k)?true:S.closed.has(k)?false:S.all==='open'?true:S.all==='closed'?false:def}
+function fold(key,def,label,tipText,cntText,bodyFn,cls){
+ const d=$('details',{class:'fold '+(cls||'')});if(isOpen(key,def))d.setAttribute('open','');
+ d.append(tip($('summary',{},$('span',{class:'lab'},label),cntText?$('span',{class:'cnt'},cntText):null),tipText));
+ const body=$('div',{class:'body','data-group':key});d.append(body);
+ let done=false;const fill=()=>{if(!done){done=true;bodyFn(body)}};
  if(d.hasAttribute('open'))fill();
- d.addEventListener('toggle',()=>{const k=S.h+'|'+key;if(d.open){S.open.add(k);S.closed.delete(k);fill()}else{S.closed.add(k);S.open.delete(k)}});
+ let last=d.open;
+ d.addEventListener('toggle',()=>{if(d.open===last)return;last=d.open;const k=S.h+'|'+key;if(d.open){S.open.add(k);S.closed.delete(k);fill()}else{S.closed.add(k);S.open.delete(k)}});
  return d}
-function itemRows(items,into){
- items=items.slice().sort((x,y)=>KINDS.indexOf(x.kind)-KINDS.indexOf(y.kind)||x.name.localeCompare(y.name));
- for(const it of items)into.append(tip($('div',{class:'it'+(S.sel===it.id?' sel':''),onclick:()=>select(it)},tagEl('kind',it.kind),$('span',{},it.name),stEl(it.status),$('span',{class:'mut mono nw'},mid(til(it.path),52))),itemTip(it)))}
+const statusBadges=items=>{const m={};for(const i of items)if(i.status!=='active')m[i.status]=(m[i.status]||0)+1;return Object.entries(m).map(([s,n])=>stEl(s,items.length>1?n:1))};
+const relIn=(it,dir)=>{if(it.scope==='local'&&/\\.claude\\.json$/.test(it.path))return 'via ~/.claude.json';const p=loc(it);if(dir==null)return til(p).replace(/^.*?\\/plugins\\/cache\\/[^/]+\\/[^/]+\\/[^/]+\\//,'');const pre=dir==='/'?'/':dir+'/';return p.startsWith(pre)?p.slice(pre.length):til(p)};
+// one row per (kind,name); N>1 gets a copies badge and an expandable list of every copy
+function rowEl(r,dir,ctx){
+ const its=r.items;const first=its[0];
+ const meta={'data-kind':r.kind,'data-name':r.name};
+ const head=()=>[$('span',{class:'nm'},r.name),its.length>1?tip($('span',{class:'x'},'\\u00D7'+its.length),its.length+' copies of this '+r.kind+' with the same name. Expand to see where each one lives and which one wins.'):null,...statusBadges(its)];
+ if(its.length===1){
+  const e=$('div',Object.assign({class:'row it'+(S.sel===first.id?' sel':''),onclick:()=>select(first)},meta),...head(),first.details&&first.details.command?$('span',{class:'mut mono cmd'},tailP(first.details.command,60)):null,relEl(tailP(relIn(first,dir)),loc(first)));
+  return tip(e,itemTip(first))}
+ const key=S.h+'|'+ctx+'|'+r.kind+'|'+r.name;
+ const d=$('details',Object.assign({class:'copies row'},meta));if(S.exp.has(key)||S.q||S.all==='open')d.setAttribute('open','');
+ d.addEventListener('toggle',()=>{if(d.open)S.exp.add(key);else S.exp.delete(key)});
+ const sum=$('summary',{class:'it'},...head(),relEl(its.length+' locations',''));
+ d.append(sum);
+ for(const it of its){const cmd=it.details&&it.details.command;
+  d.append(tip($('div',{class:'cl'+(S.sel===it.id?' sel':''),onclick:()=>select(it)},relEl(tailP(relIn(it,dir)),loc(it)),...statusBadges([it]),it.reason?$('span',{class:'mut'},it.reason):null,cmd?$('span',{class:'mut mono'},tailP(cmd,50)):null),itemTip(it)))}
+ return d}
+function kindGroups(items,dir,ctx,into){
+ for(const k of KINDS){const rows=toRows(items.filter(i=>i.kind===k));if(!rows.length)continue;
+  into.append(fold(ctx+'|'+k,rows.length<=10,KL[k]+' ('+rows.length+')',gl('kind',k),null,b=>{for(const r of rows)b.append(rowEl(r,dir,ctx))},'sub'))}}
+const kindSummary=items=>KINDS.map(k=>{const n=toRows(items.filter(i=>i.kind===k)).length;return n?KL[k].toLowerCase()+' '+n:null}).filter(Boolean).join(', ');
+function place(it,chain){
+ if(it.kind==='plugin'||it.scope==='plugin')return{cat:'plugin',key:it.plugin||it.name};
+ if(it.scope==='builtin')return{cat:'builtin'};if(it.scope==='remote')return{cat:'remote'};if(it.scope==='managed')return{cat:'managed'};
+ if(it.details&&it.details.via)return{cat:'launch'};
+ if(it.scope==='local'&&/\\.claude\\.json$/.test(it.path)){const m=(it.reason||'').match(/projects\\["(.*)"\\]/);if(m&&chain.includes(m[1]))return{dir:m[1]}}
+ const p=loc(it);let best=null;const lastD=chain[chain.length-1];
+ for(const d of chain){const pre=d==='/'?'/':d+'/';if(p.startsWith(pre)){const rest=p.slice(pre.length);if(d===lastD||/^[^/]+$/.test(rest)||/^\\.[^/]+\\//.test(rest))best=d}}
+ if(best)return{dir:best};
+ if(D.session&&D.session.launch&&D.session.harness===S.h)return{cat:'launch'};
+ return{cat:'other'}}
+function getChain(){
+ const h=H();let chain=(h.chain||[]).filter(c=>typeof c==='string').sort((a,b)=>a.length-b.length);
+ if(!chain.length){chain=['/'];let a='';for(const x of D.cwd.split('/').filter(Boolean)){a+='/'+x;chain.push(a)}}
+ if(chain[0]!=='/')chain.unshift('/');return chain}
 function folderTree(){
- const h=H();const items=(h.items||[]).filter(i=>visible(i));
- let chain=(h.chain||[]).filter(c=>typeof c==='string').sort((a,b)=>a.length-b.length);
- if(!chain.length){const root=h.projectRoot||D.cwd;chain=['/'];let a='';for(const x of root.split('/').filter(Boolean)){a+='/'+x;chain.push(a)}}
- if(chain[0]!=='/')chain.unshift('/');
- const dirItems={};const groups={};const order=[];
- const grp=(key,label,tipText,pri)=>{if(!groups[key]){groups[key]={key,label,tip:tipText,pri,items:[]};order.push(groups[key])}return groups[key]};
- const own={managed:['Managed (policy)',0],user:['User config ('+til(home)+')',1],builtin:['Built-in',90],remote:['Remote / connectors',91]};
- for(const it of items){
-  if(own[it.scope])grp('s:'+it.scope,own[it.scope][0],gl('scope',it.scope),own[it.scope][1]).items.push(it);
-  else if(it.scope==='plugin')grp('plugin:'+(it.plugin||'?'),'Plugin '+(it.plugin||'(unknown)'),gl('scope','plugin'),50).items.push(it);
-  else if(it.details&&it.details.via)grp('launch','Launch flags (--settings / --mcp-config / --plugin-dir)','Items defined by files passed on the command line when the session was launched. They are not found by walking the folder chain.',2).items.push(it);
-  else{let best=null;const lastD=chain[chain.length-1];
-   for(const d of chain){if(it.path.startsWith(d==='/'?'/':d+'/')){const rest=it.path.slice(d==='/'?1:d.length+1);
-    if(d===lastD||/^[^/]+$/.test(rest)||/^(\\.claude|\\.codex|\\.agents|\\.opencode)\\//.test(rest))best=d}}
-   if(best)(dirItems[best]||(dirItems[best]=[])).push(it);
-   else if(D.session&&D.session.launch&&D.session.harness===S.h)grp('launch','Launch flags (--settings / --mcp-config / --plugin-dir)','Items defined by files passed on the command line when the session was launched. They are not found by walking the folder chain.',2).items.push(it);
-   else grp('other','Other','Items whose file is outside the folder chain.',95).items.push(it)}}
- order.sort((a,b)=>a.pri-b.pri||a.label.localeCompare(b.label));
- const root=$('div',{class:'panel'});
- const tools=$('div',{style:'display:flex;gap:6px;align-items:center;margin-bottom:6px'},$('span',{class:'gh',style:'margin:0'},'Sources'),$('div',{class:'tools'},
-  tip($('button',{class:'chip',onclick:()=>{allKeys.forEach(k=>{S.open.add(S.h+'|'+k);S.closed.delete(S.h+'|'+k)});render()}},'Expand all'),G.ui.expand),
-  tip($('button',{class:'chip',onclick:()=>{allKeys.forEach(k=>{S.closed.add(S.h+'|'+k);S.open.delete(S.h+'|'+k)});render()}},'Collapse all'),G.ui.collapse)));
- root.append(tools);
- const allKeys=[];
- const pre=order.filter(g=>g.pri<80),post=order.filter(g=>g.pri>=80);
- const addGroup=(g,into)=>{allKeys.push(g.key);into.append(fold(g.key,false,g.label,g.tip,g.items,null,b=>itemRows(g.items,b)))};
- for(const g of pre)addGroup(g,root);
- root.append($('div',{class:'gh'},'Folders, from / down to the working directory'));
- // folders: merge runs of empty intermediate folders into one dimmed line
+ const items=(H().items||[]).filter(visible);const chain=getChain();
+ const dirItems={},cats={};
+ for(const it of items){const pl=place(it,chain);if(pl.dir)(dirItems[pl.dir]||(dirItems[pl.dir]=[])).push(it);else(cats[pl.cat]||(cats[pl.cat]=[])).push({it,key:pl.key})}
+ const wrap=$('div',{});
+ const tree=$('div',{class:'panel tree'},tip($('div',{class:'gh',style:'margin-top:0'},'Folders, from / down to the working directory'),G.ui.folder));
  const segOf=d=>d==='/'?'/':d===home?'~ (home)':d.split('/').pop();
- const buildDirs=(idx,into)=>{
-  if(idx>=chain.length)return;
-  let j=idx;const run=[];
+ const dirTip=d=>d+(d===home?'\\nYour home folder. User config (~/.claude, ~/.codex, ~/.agents, ~/.claude.json) lives here.':'');
+ const build=(idx,into)=>{
+  if(idx>=chain.length)return;let j=idx;const run=[];
   while(j<chain.length-1&&!(dirItems[chain[j]]||[]).length){run.push(chain[j]);j++}
-  if(run.length){
-   const segs=run.map(segOf);
-   into.append(tip($('div',{class:'emptyrun'},segs.join(' / ').replace('/ /','/')+'  (0 items, '+run.length+' folder'+(run.length>1?'s':'')+')'),'Empty intermediate folders. Nothing is defined here.\\n'+run[run.length-1]));
-  }
-  const d=chain[j];const its=dirItems[d]||[];const seg=segOf(d);
-  const key='d:'+d;allKeys.push(key);
-  const isCwd=j===chain.length-1;
-  const node=fold(key,its.length>0||isCwd,seg+(isCwd?'  (working directory)':''),d+'\\nFolder: '+(isCwd?'the working directory.':'items here apply to projects at or beneath it.'),its,null,b=>{itemRows(its,b);buildDirs(j+1,b)});
-  into.append(node);
- };
- buildDirs(0,root);
- for(const g of post)addGroup(g,root);
- return root}
+  if(run.length)into.append(tip($('div',{class:'emptyrun'},run.map(segOf).join(' / ').replace('/ /','/')+'  (0 items)'),'Empty folders. Nothing is defined here.\\n'+run[run.length-1]));
+  const d=chain[j];const its=dirItems[d]||[];const isCwd=j===chain.length-1;
+  into.append(fold('d:'+d,its.length>0||isCwd,segOf(d)+(isCwd?'  (working directory)':''),dirTip(d),its.length?kindSummary(its):'0 items',b=>{kindGroups(its,d,'d:'+d,b);build(j+1,b)},'dir'))};
+ build(0,tree);
+ wrap.append(tree);
+ const nft=$('div',{class:'panel nft'});
+ const total=Object.values(cats).reduce((n,a)=>n+a.length,0);
+ if(total){
+  nft.append(fold('nft',false,'Not from the folder tree',G.ui.nft,total+' items',nb=>{
+   const plug=cats.plugin||[];const byP={};for(const x of plug)(byP[x.key||'?']||(byP[x.key||'?']=[])).push(x.it);
+   const full=Object.keys(byP).filter(k=>byP[k].some(i=>i.kind!=='plugin')).sort(),bare=Object.keys(byP).filter(k=>!full.includes(k)).sort();
+   if(plug.length)nb.append(fold('nft:plugins',false,'Plugins',G.ui.plugins,full.length+' with content'+(bare.length?', '+bare.length+' bare':''),pb=>{
+    for(const k of full){const its=byP[k];const own=its.filter(i=>i.kind==='plugin');const rest=its.filter(i=>i.kind!=='plugin');
+     const f=fold('nft:p:'+k,false,k,'Plugin '+k,kindSummary(rest),b=>kindGroups(rest,null,'nft:p:'+k,b),'sub');
+     if(own.length&&own.every(i=>i.status!=='active'))f.querySelector('.cnt').append(' ',stEl(own[0].status));
+     pb.append(f)}
+    if(bare.length)pb.append(tip($('div',{class:'emptyrun'},bare.length+' other enabled plugin'+(bare.length>1?'s':'')+' with no skills, hooks or MCP servers'),bare.join('\\n')))}));
+   for(const [c,label,tp] of [['launch','Launch flags (--settings / --mcp-config / --plugin-dir)',G.ui.launch],['builtin','Built into the harness',G.scope.builtin],['remote','Account connectors',G.scope.remote],['managed','Managed policy',G.scope.managed],['other','Other (file outside the folder chain)','Items whose file is not under any folder from / to the working directory.']]){
+    const its=(cats[c]||[]).map(x=>x.it);if(!its.length)continue;
+    nb.append(fold('nft:'+c,false,label,tp,kindSummary(its),b=>kindGroups(its,null,'nft:'+c,b),'sub'))}
+  },'nftroot'));wrap.append(nft)}
+ return wrap}
+function kindView(){
+ const items=(H().items||[]).filter(visible);const wrap=$('div',{});
+ for(const k of KINDS){const rows=toRows(items.filter(i=>i.kind===k));if(!rows.length)continue;
+  wrap.append($('div',{class:'panel'},fold('k:'+k,rows.length<=40,KL[k],gl('kind',k),rows.length+' name'+(rows.length>1?'s':'')+' ('+items.filter(i=>i.kind===k).length+' items)',b=>{
+   const t=$('table',{},$('thead',{},$('tr',{},[['name',G.ui.th.name],['copies','How many items share this name.'],['source',G.ui.th.path],['status','Only shown when not active.']].map(([c,tx])=>tip($('th',{},c),tx)))));
+   const tb=$('tbody',{'data-group':'k:'+k});
+   for(const r of rows){const its=r.items,first=its[0];
+    const src=its.length===1?(first.scope==='plugin'&&first.plugin?'plugin '+first.plugin:tailP(til(loc(first)),70)):its.length+' locations';
+    const key=S.h+'|k|'+k+'|'+r.name;const open=S.exp.has(key)||S.q||S.all==='open';
+    const tr=$('tr',{class:'row item'+(its.length===1&&S.sel===first.id?' sel':''),'data-kind':k,'data-name':r.name,onclick:()=>{if(its.length===1)select(first);else{if(S.exp.has(key))S.exp.delete(key);else S.exp.add(key);render()}}},
+     $('td',{class:'nm'},(its.length>1?(open?'\\u25BE ':'\\u25B8 '):'')+r.name),$('td',{},its.length>1?tip($('span',{class:'x'},'\\u00D7'+its.length),its.length+' copies with the same name. Click to list them.'):''),$('td',{class:'p mono'},relEl(src,its.length===1?loc(first):'')),$('td',{},...statusBadges(its)));
+    tb.append(tip(tr,its.length===1?itemTip(first):r.name+': '+its.length+' copies'));
+    if(its.length>1&&open)for(const it of its)tb.append(tip($('tr',{class:'cl2'+(S.sel===it.id?' sel':''),onclick:()=>select(it)},$('td',{}),$('td',{}),$('td',{class:'p mono'},relEl(tailP(til(loc(it)),90),loc(it)),it.reason?$('span',{class:'mut'},'  '+it.reason):null),$('td',{},...statusBadges([it]))),itemTip(it)))}
+   t.append(tb);b.append(t)},'kindsec')))}
+ return wrap}
 // ---- live status + details
 function liveSummary(){
  const h=H();const c=D.compare[S.h];
@@ -11910,12 +11953,13 @@ function liveDetails(){
   if(blocks.length)d.append($('div',{class:'gh'},names[k]),...blocks)}
  return $('div',{class:'below'},d)}
 function strip(){
- const items=H().items||[];const act={};for(const i of items)if(i.status==='active')act[i.kind]=(act[i.kind]||0)+1;
- const el=$('div',{class:'strip'},tip($('span',{class:'mut'},'active:'),G.status.active));
- for(const k of KINDS)if(act[k])el.append(tip($('button',{class:'chip'+(S.kind.has(k)?' on':''),onclick:()=>{S.kind.has(k)?S.kind.delete(k):S.kind.add(k);S.view='kind';render()}},k+' '+act[k]),'Active '+k+' items. '+gl('kind',k)+'\\nClick to filter the table.'));
- el.append($('span',{class:'sep'}),tip($('span',{class:'mut'},'attention:'),'Items that are not simply loaded: they may need action or explain surprises.'));
+ const items=H().items||[];const act={},uniq={};
+ for(const i of items)if(i.status==='active'){act[i.kind]=(act[i.kind]||0)+1;(uniq[i.kind]||(uniq[i.kind]=new Set())).add(i.name)}
+ const el=$('div',{class:'strip'},tip($('span',{class:'mut'},'loaded:'),'Active items of each kind in this session. For skills, commands and agents, same-named copies are counted as items and the number of unique names is shown in brackets.'));
+ for(const k of KINDS)if(act[k]){const u=uniq[k].size;const un=DEDUPE.has(k)&&u!==act[k];el.append(tip($('span',{class:'ac','data-kind':k,'data-count':act[k]},$('b',{},act[k]),' '+KL[k].toLowerCase()+(un?' ('+u+' unique)':'')),'Active '+KL[k].toLowerCase()+': '+act[k]+' items'+(un?', '+u+' unique names':'')+'. '+gl('kind',k)))}
+ el.append($('span',{class:'sep'}));
  const st=cnt('status');
- for(const k of ['needs-approval','unknown','shadowed','disabled'])el.append(tip($('button',{class:'chip warn'+(S.status.has(k)?' on':''),onclick:()=>{S.status.has(k)?S.status.delete(k):S.status.add(k);S.view='kind';render()}},k+' '+(st[k]||0)),gl('status',k)+'\\nClick to filter the table.'));
+ for(const k of ['needs-approval','unknown','shadowed','disabled'])el.append(tip($('button',{class:'chip warn'+(S.status.has(k)?' on':''),onclick:()=>{S.status.has(k)?S.status.delete(k):S.status.add(k);render()}},k+' '+(st[k]||0)),gl('status',k)+'\\nClick to show only these items.'));
  const ws=H().warnings||[];
  if(ws.length)el.append($('span',{class:'sep'}),tip($('span',{class:'chip note',tabindex:'0'},ws.length+' note'+(ws.length>1?'s':'')),'Notes from the audit:\\n'+ws.join('\\n')));
  return el}
@@ -11923,12 +11967,12 @@ function render(){
  hideTip();
  const root=document.getElementById('app');root.textContent='';
  const nav=$('nav',{},names.map(n=>tip($('button',{class:n===S.h?'on':'',onclick:()=>{S.h=n;S.sel=null;try{history.replaceState(null,'','#'+n)}catch(e){}render()}},n+' ('+((D.harnesses[n].items||[]).length)+')'),'Show what the '+n+' harness loads. The number is how many items it found.')));
- const h=H();
  const head=$('header',{},$('h1',{},'context-audit'),$('div',{class:'mut mono'},'cwd '+til(D.cwd)+'  |  generated '+D.generatedAt+(D.session&&D.session.harness?'  |  session '+D.session.harness+' pid '+D.session.pid:'')));
- const left=$('div',{},$('div',{class:'views'},[['folder','Folder tree'],['kind','By kind']].map(([k,l])=>tip($('button',{class:S.view===k?'on':'',onclick:()=>{S.view=k;render()}},l),k==='folder'?G.ui.folder:G.ui.bykind))),toolbar(),S.view==='folder'?folderTree():table());
+ const left=$('div',{},toolbar(),S.view==='folder'?folderTree():kindView());
  root.append(...[head,nav,strip(),launchLine(),liveSummary(),$('main',{},left,$('aside',{},detail())),liveDetails()].filter(Boolean));
  const dt=QS.get('demoTooltip');if(dt){const el=document.querySelector('[data-tip*="'+dt.replace(/"/g,'')+'"]');if(el)showTip(el)}
 }
+addEventListener('hashchange',()=>{const t=decodeURIComponent((location.hash||'').slice(1));if(names.includes(t)&&t!==S.h){S.h=t;S.sel=null;render()}});
 render();
 {const y=Number(QS.get('scroll'));if(y)window.scrollTo(0,y)}
 `;
