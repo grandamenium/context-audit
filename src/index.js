@@ -1,5 +1,5 @@
 import os from 'node:os';
-import { SCHEMA_VERSION } from './model.js';
+import { SCHEMA_VERSION, redact } from './model.js';
 import path from 'node:path';
 import { canonical, readFrontmatter } from './fsutil.js';
 import { detectSession } from './session.js';
@@ -59,7 +59,9 @@ export function audit(opts = {}) {
     if (live) report.harnesses[name].live = live;
   }
   report.hygiene = skillHygiene(report);
-  return report;
+  // Discovery needs the real launch settings. Only redact after adapters finish,
+  // including the session metadata and diagnostics that bypass item-level filters.
+  return redact(report);
 }
 
 // Skill files whose frontmatter will confuse a harness or a reader: missing name/description,

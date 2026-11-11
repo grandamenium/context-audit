@@ -8,6 +8,7 @@ import { renderHtml } from './render/html.js';
 import { renderApp } from './render/app.js';
 import { listRunning, listRecent, listFolder } from './discover.js';
 import { parseLaunchFlags, processArgs, processCwd } from './session.js';
+import { redact } from './model.js';
 
 function reportFor(q) {
   const harnesses = q.get('harness') ? q.get('harness').split(',').filter(Boolean) : undefined;
@@ -26,20 +27,34 @@ function reportFor(q) {
   return audit({ cwd: dir, harnesses, live: q.get('live') === '1', sessionId: q.get('session') || undefined, launch, session });
 }
 
-export function startServer({ port = 4747, host = '127.0.0.1' } = {}) {
+export async function startServer({ port = 4747, host = '127.0.0.1' } = {}) {
+  if (host !== '127.0.0.1' && host !== '::1') throw new Error('context-audit must bind to a literal loopback address');
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url, `http://${host}`);
+    const send = (status, type, body, headers = {}) => { res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff', ...headers }); res.end(body); };
+    const authority = req.headers.host;
+    const localPort = server.address().port;
+    const allowed = new Set([`127.0.0.1:${localPort}`, `localhost:${localPort}`, `[::1]:${localPort}`]);
+    // A loopback socket alone does not prevent foreign browser origins or DNS
+    // rebinding from requesting local configuration and process metadata.
+    if (!allowed.has(authority)
+        || (req.headers.origin && req.headers.origin !== `http://${authority}`)
+        || (req.headers['sec-fetch-site'] && !['same-origin', 'none'].includes(req.headers['sec-fetch-site']))) {
+      return send(403, 'text/plain; charset=utf-8', 'local same-origin requests only');
+    }
+    if (!['GET', 'HEAD'].includes(req.method)) return send(405, 'text/plain; charset=utf-8', 'method not allowed');
+    let url;
+    try { url = new URL(req.url, `http://${authority}`); }
+    catch { return send(400, 'text/plain; charset=utf-8', 'invalid request URL'); }
+    if (url.origin !== `http://${authority}`) return send(403, 'text/plain; charset=utf-8', 'local same-origin requests only');
     const q = url.searchParams;
-    const send = (status, type, body) => { res.writeHead(status, { 'content-type': type, 'cache-control': 'no-store' }); res.end(body); };
-    const json = (v) => send(200, 'application/json; charset=utf-8', JSON.stringify(v));
+    const json = (v) => send(200, 'application/json; charset=utf-8', JSON.stringify(redact(v)));
     try {
       switch (url.pathname) {
         case '/': return send(200, 'text/html; charset=utf-8', renderApp({ home: os.homedir(), cwd: process.cwd() }));
         case '/report': return send(200, 'text/html; charset=utf-8', renderHtml(reportFor(q)));
         case '/api/audit': {
           const body = JSON.stringify(reportFor(q), null, 2);
-          res.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'content-disposition': 'attachment; filename="context-audit.json"' });
-          return res.end(body);
+          return send(200, 'application/json; charset=utf-8', body, { 'content-disposition': 'attachment; filename="context-audit.json"' });
         }
         case '/api/running': return json(listRunning());
         case '/api/recent': return json(listRecent({ hours: Number(q.get('hours') || 72) }));
@@ -54,6 +69,7 @@ export function startServer({ port = 4747, host = '127.0.0.1' } = {}) {
   });
   return new Promise((resolve, reject) => {
     server.once('error', reject);
-    server.listen(port, host, () => resolve({ server, url: `http://${host}:${server.address().port}/` }));
+    const hostname = host === '::1' ? '[::1]' : host;
+    server.listen(port, host, () => resolve({ server, url: `http://${hostname}:${server.address().port}/` }));
   });
 }
