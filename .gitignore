@@ -4,3 +4,7 @@ verify/out/
 .DS_Store
 *.tgz
 verify/local/
+
+# Legacy machine-specific verification paths must stay private.
+verify/ground-truth/
+verify/adjudications.json

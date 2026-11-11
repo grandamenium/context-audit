@@ -38,17 +38,48 @@ export function item(fields) {
 }
 
 const SECRET_KEY = /(token|secret|key|password|authorization|cookie|bearer|credential)/i;
+const REDACTED = '<redacted>';
+
+function redactText(value) {
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      if (url.username || url.password) { url.username = REDACTED; url.password = ''; }
+      for (const key of [...url.searchParams.keys()]) if (SECRET_KEY.test(key)) url.searchParams.set(key, REDACTED);
+      if (SECRET_KEY.test(url.hash)) url.hash = REDACTED;
+      return url.toString();
+    } catch { /* Fall through for malformed or embedded URLs. */ }
+  }
+  // Shell commands and serialized JSON/TOML have different quoting rules.
+  // Prefer hiding a whole credential-bearing string to guessing its value's end.
+  if (/[\w.-]*(?:token|secret|key|password|authorization|cookie|credential)[\w.-]*["']?\s*[=:]/i.test(value)) return REDACTED;
+  return value
+    .replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, '$1<redacted>@')
+    .replace(/(--[\w.-]*(?:token|secret|key|password|authorization|cookie|credential)[\w.-]*(?:=|\s+))(?:"[^"]*"|'[^']*'|[^\s;]+)/gi, '$1<redacted>')
+    .replace(/\b(Bearer\s+)[^\s"'&,;]+/gi, '$1<redacted>');
+}
 
 // Replace values of env/headers and any secret-looking keys before anything leaves the tool.
 export function redact(obj) {
-  if (Array.isArray(obj)) return obj.map(redact);
+  if (typeof obj === 'string') return redactText(obj);
+  if (Array.isArray(obj)) {
+    let secretArgument = false;
+    return obj.map((value) => {
+      if (secretArgument) { secretArgument = false; return REDACTED; }
+      if (typeof value === 'string' && /^--[\w.-]+$/.test(value) && SECRET_KEY.test(value)) {
+        secretArgument = true;
+        return value;
+      }
+      return redact(value);
+    });
+  }
   if (!obj || typeof obj !== 'object') return obj;
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     if (['env', 'headers', 'environment', 'http_headers', 'env_http_headers'].includes(k) && v && typeof v === 'object') {
       out[k] = Object.fromEntries(Object.keys(v).map((kk) => [kk, '<redacted>']));
-    } else if (SECRET_KEY.test(k) && typeof v === 'string') {
-      out[k] = '<redacted>';
+    } else if (SECRET_KEY.test(k) || (['command', 'cmd', 'script'].includes(k) && typeof v === 'string' && SECRET_KEY.test(v))) {
+      out[k] = REDACTED;
     } else {
       out[k] = redact(v);
     }

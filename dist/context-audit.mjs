@@ -45,26 +45,58 @@ function item(fields) {
   it.id = `${it.harness}:${it.kind}:${it.scope}:${it.name}@${it.path}`;
   return it;
 }
+function redactText(value) {
+  if (/^https?:\/\//i.test(value)) {
+    try {
+      const url = new URL(value);
+      if (url.username || url.password) {
+        url.username = REDACTED;
+        url.password = "";
+      }
+      for (const key of [...url.searchParams.keys()]) if (SECRET_KEY.test(key)) url.searchParams.set(key, REDACTED);
+      if (SECRET_KEY.test(url.hash)) url.hash = REDACTED;
+      return url.toString();
+    } catch {
+    }
+  }
+  if (/[\w.-]*(?:token|secret|key|password|authorization|cookie|credential)[\w.-]*["']?\s*[=:]/i.test(value)) return REDACTED;
+  return value.replace(/\b([a-z][a-z0-9+.-]*:\/\/)[^/\s@]+@/gi, "$1<redacted>@").replace(/(--[\w.-]*(?:token|secret|key|password|authorization|cookie|credential)[\w.-]*(?:=|\s+))(?:"[^"]*"|'[^']*'|[^\s;]+)/gi, "$1<redacted>").replace(/\b(Bearer\s+)[^\s"'&,;]+/gi, "$1<redacted>");
+}
 function redact(obj) {
-  if (Array.isArray(obj)) return obj.map(redact);
+  if (typeof obj === "string") return redactText(obj);
+  if (Array.isArray(obj)) {
+    let secretArgument = false;
+    return obj.map((value) => {
+      if (secretArgument) {
+        secretArgument = false;
+        return REDACTED;
+      }
+      if (typeof value === "string" && /^--[\w.-]+$/.test(value) && SECRET_KEY.test(value)) {
+        secretArgument = true;
+        return value;
+      }
+      return redact(value);
+    });
+  }
   if (!obj || typeof obj !== "object") return obj;
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     if (["env", "headers", "environment", "http_headers", "env_http_headers"].includes(k) && v && typeof v === "object") {
       out[k] = Object.fromEntries(Object.keys(v).map((kk) => [kk, "<redacted>"]));
-    } else if (SECRET_KEY.test(k) && typeof v === "string") {
-      out[k] = "<redacted>";
+    } else if (SECRET_KEY.test(k) || ["command", "cmd", "script"].includes(k) && typeof v === "string" && SECRET_KEY.test(v)) {
+      out[k] = REDACTED;
     } else {
       out[k] = redact(v);
     }
   }
   return out;
 }
-var SCHEMA_VERSION, SECRET_KEY;
+var SCHEMA_VERSION, SECRET_KEY, REDACTED;
 var init_model = __esm({
   "src/model.js"() {
     SCHEMA_VERSION = 1;
     SECRET_KEY = /(token|secret|key|password|authorization|cookie|bearer|credential)/i;
+    REDACTED = "<redacted>";
   }
 });
 
@@ -11354,7 +11386,7 @@ function audit(opts = {}) {
     if (live) report.harnesses[name].live = live;
   }
   report.hygiene = skillHygiene(report);
-  return report;
+  return redact(report);
 }
 function skillHygiene(report) {
   const byPath = /* @__PURE__ */ new Map();
@@ -12271,15 +12303,29 @@ function reportFor(q) {
   if (!dir || !fs8.existsSync(dir)) throw Object.assign(new Error(`folder not found: ${dir || "(none)"}`), { status: 404 });
   return audit({ cwd: dir, harnesses, live: q.get("live") === "1", sessionId: q.get("session") || void 0, launch, session });
 }
-function startServer({ port = 4747, host = "127.0.0.1" } = {}) {
+async function startServer({ port = 4747, host = "127.0.0.1" } = {}) {
+  if (host !== "127.0.0.1" && host !== "::1") throw new Error("context-audit must bind to a literal loopback address");
   const server = http.createServer((req, res) => {
-    const url = new URL(req.url, `http://${host}`);
-    const q = url.searchParams;
-    const send = (status, type, body) => {
-      res.writeHead(status, { "content-type": type, "cache-control": "no-store" });
+    const send = (status, type, body, headers = {}) => {
+      res.writeHead(status, { "content-type": type, "cache-control": "no-store", "x-content-type-options": "nosniff", ...headers });
       res.end(body);
     };
-    const json = (v) => send(200, "application/json; charset=utf-8", JSON.stringify(v));
+    const authority = req.headers.host;
+    const localPort = server.address().port;
+    const allowed = /* @__PURE__ */ new Set([`127.0.0.1:${localPort}`, `localhost:${localPort}`, `[::1]:${localPort}`]);
+    if (!allowed.has(authority) || req.headers.origin && req.headers.origin !== `http://${authority}` || req.headers["sec-fetch-site"] && !["same-origin", "none"].includes(req.headers["sec-fetch-site"])) {
+      return send(403, "text/plain; charset=utf-8", "local same-origin requests only");
+    }
+    if (!["GET", "HEAD"].includes(req.method)) return send(405, "text/plain; charset=utf-8", "method not allowed");
+    let url;
+    try {
+      url = new URL(req.url, `http://${authority}`);
+    } catch {
+      return send(400, "text/plain; charset=utf-8", "invalid request URL");
+    }
+    if (url.origin !== `http://${authority}`) return send(403, "text/plain; charset=utf-8", "local same-origin requests only");
+    const q = url.searchParams;
+    const json = (v) => send(200, "application/json; charset=utf-8", JSON.stringify(redact(v)));
     try {
       switch (url.pathname) {
         case "/":
@@ -12288,8 +12334,7 @@ function startServer({ port = 4747, host = "127.0.0.1" } = {}) {
           return send(200, "text/html; charset=utf-8", renderHtml(reportFor(q)));
         case "/api/audit": {
           const body = JSON.stringify(reportFor(q), null, 2);
-          res.writeHead(200, { "content-type": "application/json; charset=utf-8", "content-disposition": 'attachment; filename="context-audit.json"' });
-          return res.end(body);
+          return send(200, "application/json; charset=utf-8", body, { "content-disposition": 'attachment; filename="context-audit.json"' });
         }
         case "/api/running":
           return json(listRunning());
@@ -12308,7 +12353,8 @@ function startServer({ port = 4747, host = "127.0.0.1" } = {}) {
   });
   return new Promise((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, host, () => resolve({ server, url: `http://${host}:${server.address().port}/` }));
+    const hostname = host === "::1" ? "[::1]" : host;
+    server.listen(port, host, () => resolve({ server, url: `http://${hostname}:${server.address().port}/` }));
   });
 }
 var init_server = __esm({
@@ -12318,6 +12364,7 @@ var init_server = __esm({
     init_app();
     init_discover();
     init_session();
+    init_model();
   }
 });
 

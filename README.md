@@ -1,123 +1,118 @@
 # context-audit
 
-See exactly what context an AI coding agent loads when it starts in a folder: bootstrap docs (`CLAUDE.md`, `AGENTS.md`, `@imports`, rules), skills, hooks, MCP servers, plugins, commands and agents. Every item comes with the file it is defined in, the level it comes from (managed, user, parent folder, project, local, plugin) and whether it is active, shadowed, disabled, waiting for approval or unknown, with the reason.
+Inspect the local context configuration behind an AI coding session. Trace bootstrap instructions, skills, hooks, MCP servers, plugins, commands and agents back to their source files, with status and precedence explanations.
 
-Supports **Claude Code**, **Codex** and **OpenCode**.
+Supports **Claude Code**, **Codex** and **OpenCode**. Runs locally with **Node.js 20+**, using the included prebuilt file. No dependency installation is needed to run it.
 
-## Quick start: ask your agent
+[Quick start](#quick-start) · [Usage](#usage) · [Coverage and limits](#coverage-and-limits) · [Privacy](#privacy-and-report-handling) · [Development](#development)
 
-Paste this into Claude Code, Codex or OpenCode:
+## Quick start
+
+Paste this exact prompt into your coding agent:
 
 > Run this on yourself: https://github.com/grandamenium/context-audit
 
-The agent clones the repo, audits its own live session, opens an interactive report in your browser and replies with a standard summary. Tested blind with fresh Claude Code and Codex agents. A bare "use this" works for most agents, but Codex may ask what you want first.
+The agent runs the audit from its working session and returns a Markdown summary plus an interactive HTML report. When session detection succeeds, the audit uses the agent's boot folder and launch configuration. It attempts to open the report in a browser; file delivery and browser access depend on your agent interface.
 
-## For AI agents
+Use the full prompt above. A bare repository URL can leave the intended action unclear.
 
-If a user gave you this link and asked you to use it, do this:
+### For AI agents
 
-```sh
-git clone https://github.com/grandamenium/context-audit /tmp/context-audit   # skip if already cloned
-node /tmp/context-audit/dist/context-audit.mjs
-```
-
-No install step is needed, only Node.js 20+. When an agent runs it, the tool detects that agent's own session (harness, process, boot folder, launch flags), compares against the session's own log, writes an interactive HTML report, opens it in the user's browser, and prints a fixed-format summary.
-
-**Always answer in this shape:** send everything between `===== BEGIN CONTEXT AUDIT =====` and `===== END CONTEXT AUDIT =====` exactly as printed (also in chat channels such as Telegram or Slack), give the user the HTML report in one click (attach the file if your interface can send files, otherwise the clickable `file://` link the tool prints, never a bare path), then answer their specific question in a sentence or two. Skills-aware agents can install [`skills/context-audit/SKILL.md`](skills/context-audit/SKILL.md) to do this without instructions.
-
-## Install
-
-Requires Node.js 20 or newer.
+Follow [AGENTS.md](AGENTS.md). Clone to a temporary folder if needed, then run the prebuilt file **from your normal working directory**, keeping the session you intend to inspect:
 
 ```sh
-git clone https://github.com/grandamenium/context-audit.git
-cd context-audit
+audit_repo="$(mktemp -d "${TMPDIR:-/tmp}/context-audit-repo.XXXXXX")"
+git clone https://github.com/grandamenium/context-audit.git "$audit_repo"
+node "$audit_repo/dist/context-audit.mjs"
 ```
 
-Run it with no install step using the prebuilt single-file build:
+If already cloned, run `node <repo>/dist/context-audit.mjs` from that same working directory. Do not change into the clone to audit the user's session.
+
+Return everything between `===== BEGIN CONTEXT AUDIT =====` and `===== END CONTEXT AUDIT =====` exactly as printed. Attach the HTML file if your interface supports it; otherwise provide the clickable `file://` link printed by the tool. Then answer any specific question briefly. Handle the output as private session data.
+
+Agents with skill support can use [skills/context-audit/SKILL.md](skills/context-audit/SKILL.md). To contribute to this repository, see [Development](#development).
+
+## Usage
+
+After cloning, use the included build directly. These commands assume you are in the clone; replace `/path/to/project` with the folder you want to inspect:
+
+```sh
+node dist/context-audit.mjs /path/to/project --tree
+node dist/context-audit.mjs /path/to/project --harness codex --all --tree
+node dist/context-audit.mjs /path/to/project --kind skill,mcp,hook --tree
+node dist/context-audit.mjs /path/to/project --json
+node dist/context-audit.mjs /path/to/project --html /tmp/context-audit-report.html --open
+node dist/context-audit.mjs --help
+```
+
+With no folder argument, the tool attempts to detect the invoking agent's session. In an agent, the default is a fixed-format summary and HTML report; in a regular terminal, it is a tree view. Use `--summary` to request a summary, `--tree` for terminal output, or `--no-open` to skip the browser. Agent-mode reports are written to the system temporary directory unless you supply `--html <file>`.
+
+`--live` compares predictions with evidence in a readable Claude Code or Codex session log. Use `--session <id>` to select a particular session. Missing log evidence does not prove that an item was absent.
+
+### Local web UI
 
 ```sh
 node dist/context-audit.mjs serve
 ```
 
-Or install dependencies and put `context-audit` on your PATH:
-
-```sh
-npm install
-npm link            # optional: makes `context-audit` available everywhere
-```
-
-## Use
-
-### Web UI
-
-```sh
-context-audit serve            # opens http://127.0.0.1:4747 (local only)
-```
-
-Pick what to audit:
-
-- **Running agents** - live Claude Code, Codex and OpenCode processes. The audit uses the folder the agent started in and its launch flags (for example `--settings`, `--mcp-config`, `--plugin-dir`), then checks the result against the session's own log.
-- **Recent sessions** - sessions from the last 72 hours, compared with what each session actually loaded.
-- **Audit a folder** - type or browse to any folder to see what a new session started there would load.
-
-### Terminal
-
-```sh
-context-audit                       # in an agent: summary + HTML report; in a terminal: tree view
-context-audit path/to/project       # audit a specific folder
-context-audit --harness claude      # one harness: claude, codex, opencode
-context-audit --kind skill,mcp,hook # only some kinds
-context-audit --all                 # include shadowed and disabled items, with reasons
-context-audit --live                # compare with the live session log
-context-audit --json                # machine-readable report
-context-audit --html report.html --open
-context-audit --summary             # fixed-format summary + HTML report (agent default)
-context-audit --tree                # tree view even inside an agent
-```
-
-When an agent runs `context-audit` itself, the tool finds that agent's process, the folder it booted in and its launch flags, so the report describes the session you are talking to, not just the shell's current folder.
+Opens `http://127.0.0.1:4747`. Choose a running agent, a recent session, or a folder. The UI reads local process and configuration metadata. Keep it on loopback, do not tunnel or expose it publicly, and stop it with `Ctrl+C` when finished. Use `serve --no-open` to start without opening a browser.
 
 ### Library
 
+After installing dependencies in your checkout, import the source API:
+
 ```js
-import { audit } from 'context-audit';
+import { audit } from './src/index.js';
 
 const report = audit({ cwd: '/path/to/project', harnesses: ['claude', 'codex'] });
-for (const item of report.harnesses.claude.items) {
+for (const item of report.harnesses.codex.items) {
   console.log(item.kind, item.name, item.status, item.path);
 }
 ```
 
-The report shape is versioned by `schemaVersion`. Values of `env`, `headers` and secret-looking keys are always redacted.
+The JSON report includes `schemaVersion` for consumers.
 
-## What it reads
+## Coverage and limits
 
-| | Bootstrap docs | Skills | MCP servers | Hooks |
-|---|---|---|---|---|
-| Claude Code | managed, `~/.claude/CLAUDE.md`, every parent folder's `CLAUDE.md` / `CLAUDE.local.md`, `.claude/rules`, `@imports`, `AGENTS.md` fallback | `~/.claude/skills`, project `.claude/skills`, plugins, commands | `~/.claude.json` (user and per-project), `.mcp.json` with approval state, plugins, managed | settings files, plugins, skill frontmatter |
-| Codex | `~/.codex/AGENTS.md`, `AGENTS.md` from repo root down to the folder | `~/.codex/skills`, `.agents/skills`, plugins, listing budget | `config.toml` layers, plugins | `hooks.json`, `[hooks]`, plugins, `notify` |
-| OpenCode | `AGENTS.md` / `CLAUDE.md`, `instructions` | `.opencode`, `.claude`, `.agents` skill folders | `mcp` config | plugins |
+The adapters resolve local files and known configuration rules. Reports include source paths, scope and status: `active`, `conditional`, `disabled`, `shadowed`, `needs-approval` or `unknown`. An `active` prediction describes the adapter's configuration model; it is not proof that the model received or executed that item.
 
-Some things are not knowable from files and are labeled as such instead of guessed: claude.ai connectors (`unknown`), skills built into a harness binary, and Codex skills whose inclusion depends on the context window chosen at launch.
+| Harness | Local sources inspected | Live comparison |
+| --- | --- | --- |
+| Claude Code | `CLAUDE.md`, `AGENTS.md` fallback, imports, rules, settings, skills, plugins, hooks and MCP configuration | Available transcript evidence |
+| Codex | `AGENTS.md` hierarchy, layered `config.toml`, skills, plugins, rules, hooks and MCP configuration | Available rollout evidence |
+| OpenCode | `AGENTS.md` / `CLAUDE.md`, configured instructions, skill folders, plugins and MCP configuration | Not implemented |
 
-## Verification
+Coverage depends on harness versions, readable local files and what the harness records. Account connectors, binary-provided context, remote configuration, policy layers and lazy loading may be unknown or unmodeled. Codex skill-list budgets are inferred from observed behavior and may vary by model and launch settings.
 
-`npm test` runs the fixture tests. The `verify/` folder holds the checks used to validate the tool against real harnesses on your own machine:
+Live skill and MCP inventories can be incomplete. A session may expose capabilities without logging them in a format this tool recognizes. Treat empty observed lists and prediction differences as evidence to investigate, not a complete inventory of the live context window. This tool does not inspect the model's internal state or perform a comprehensive security audit.
 
-- `node verify/canary.js claude,codex,opencode <tmpdir>` builds a throwaway project with tagged docs, skills and an MCP server, boots each real harness in it and compares what loaded with what context-audit predicted. This makes a few model calls.
-- `node verify/run.js --hours 24` scores predictions against every recent real session's own log.
-- `node verify/blind.js` compares against hand-written ground truth you place in `verify/local/ground-truth/`.
-- `node verify/report.js` builds an HTML summary of the results.
+## Privacy and report handling
+
+The audit reads local configuration, instruction metadata and, in live mode, session logs. HTML and JSON reports can include usernames in absolute paths, project and server names, commands, configuration details and session identifiers. The HTML embeds report data even when a section is collapsed or filtered out.
+
+Secret-value redaction is a best-effort safeguard, not a guarantee that a report is safe to share. Review the full exported data before sharing it. Keep real reports, screenshots and verification outputs out of public repositories and issue threads. Use synthetic fixtures for examples and bug reports.
+
+Default agent reports live in the system temporary directory; explicit `--html` output goes to the path you choose. Delete private reports when you no longer need them. Verification data belongs in the ignored `verify/local/` and `verify/out/` folders. The optional verification HTML currently loads Google Fonts when opened.
 
 ## Development
 
 ```sh
-npm install
+npm ci
 npm test
-npm run build   # regenerates dist/context-audit.mjs
+npm run build
 ```
+
+The build regenerates `dist/context-audit.mjs` and its [third-party license notices](dist/THIRD_PARTY_LICENSES.txt). Keep generated files in sync when changing source code. For a local `context-audit` command, run `npm link` from the checkout after installing dependencies.
+
+Use synthetic fixtures in tests and keep machine-specific evidence private. The [verify/](verify/) scripts provide optional checks against installed harnesses:
+
+- `node verify/canary.js claude,codex,opencode <tmpdir>` creates a throwaway project and boots real harnesses. It makes model calls and may incur charges.
+- `node verify/run.js --hours 24` compares predictions with recent local session logs.
+- `node verify/blind.js` compares predictions with ground truth in `verify/local/ground-truth/`.
+- `node verify/report.js` builds an HTML summary of available verification results.
+
+These checks depend on your local environment and do not establish universal coverage.
 
 ## License
 
-MIT
+[MIT](LICENSE). Bundled dependencies retain their [own license notices](dist/THIRD_PARTY_LICENSES.txt).
